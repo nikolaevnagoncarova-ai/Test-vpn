@@ -8,7 +8,6 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 DB_FILE = "vpn_shop.db"
 
@@ -89,14 +88,14 @@ def confirm_kb(tarif_id: str):
 
 def profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
+        [InlineKeyboardButton(text="⭐️ Пополнить баланс (Telegram Stars)", callback_data="topup_menu")],
         [InlineKeyboardButton(text="« Назад", callback_data="back_main")]
     ])
 
 def topup_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1₽ (Тест)", callback_data="pay_1"), InlineKeyboardButton(text="10₽", callback_data="pay_10")],
-        [InlineKeyboardButton(text="100₽", callback_data="pay_100"), InlineKeyboardButton(text="300₽", callback_data="pay_300")],
+        [InlineKeyboardButton(text="1 ⭐️ (Тест)", callback_data="paystars_1"), InlineKeyboardButton(text="10 ⭐️", callback_data="paystars_10")],
+        [InlineKeyboardButton(text="50 ⭐️", callback_data="paystars_50"), InlineKeyboardButton(text="100 ⭐️", callback_data="paystars_100")],
         [InlineKeyboardButton(text="« Назад в профиль", callback_data="profile")]
     ])
 
@@ -143,6 +142,7 @@ async def start_handler(message: types.Message, command: CommandObject):
 
 @dp.callback_query(F.data == "catalog")
 async def catalog_handler(callback: types.CallbackQuery):
+    await callback.answer()
     text = (
         "🛒 **Каталог подписок shvecarskyVPN**\n\n"
         "Выберите подходящий период действия тарифного плана:\n\n"
@@ -151,10 +151,10 @@ async def catalog_handler(callback: types.CallbackQuery):
         "Ключ выдается моментально сразу после подтверждения!"
     )
     await callback.message.edit_text(text, reply_markup=catalog_kb(), parse_mode="Markdown")
-    await callback.answer()
 
 @dp.callback_query(F.data.startswith("select_tarif_"))
 async def select_tarif_handler(callback: types.CallbackQuery):
+    await callback.answer()
     tarif_id = callback.data.split("_")[2]
     tarif = TARIFS.get(tarif_id)
     
@@ -169,7 +169,6 @@ async def select_tarif_handler(callback: types.CallbackQuery):
         f"Вы уверены, что хотите продолжить?"
     )
     await callback.message.edit_text(text, reply_markup=confirm_kb(tarif_id), parse_mode="Markdown")
-    await callback.answer()
 
 @dp.callback_query(F.data.startswith("buy_confirm_"))
 async def buy_confirm_handler(callback: types.CallbackQuery):
@@ -183,7 +182,6 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
 
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        
         cur.execute("SELECT id, key_data FROM keys WHERE is_sold = 0 AND duration = ? LIMIT 1", (tarif["months"],))
         key = cur.fetchone()
         
@@ -205,6 +203,7 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
             
         conn.commit()
     
+    await callback.answer()
     text = (
         f"✅ **Оплата прошла успешно!**\n\n"
         f"Ваш персональный ключ ({tarif['name']}):\n\n"
@@ -212,40 +211,35 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         f"*(Нажмите на ключ, чтобы скопировать в буфер обмена)*\n\n"
         f"{HAPP_INSTRUCTION}"
     )
-    
     await callback.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
-    await callback.answer()
 
-# --- ПОПОЛНЕНИЕ БАЛАНСА ЧЕРЕЗ ЮКАССУ ---
+# --- ПОПОЛНЕНИЕ ЗВЕЗДАМИ (TELEGRAM STARS) ---
 @dp.callback_query(F.data == "topup_menu")
 async def topup_menu_handler(callback: types.CallbackQuery):
+    await callback.answer()
     text = (
-        "💳 **Пополнение баланса (ЮKassa)**\n\n"
-        "Выберите сумму пополнения из предложенных вариантов ниже:"
+        "⭐️ **Пополнение баланса (Telegram Stars)**\n\n"
+        "Выберите количество звезд для покупки. Каждая 1 ⭐️ зачисляет 1₽ на ваш баланс:"
     )
     await callback.message.edit_text(text, reply_markup=topup_amounts_kb(), parse_mode="Markdown")
-    await callback.answer()
 
-@dp.callback_query(F.data.startswith("pay_"))
-async def pay_invoice_handler(callback: types.CallbackQuery):
-    if not PAYMENT_TOKEN:
-        return await callback.answer("⚠️ Оплата временно недоступна (не настроен PAYMENT_TOKEN).", show_alert=True)
-        
-    amount = int(callback.data.split("_")[1])
+@dp.callback_query(F.data.startswith("paystars_"))
+async def pay_stars_handler(callback: types.CallbackQuery):
+    await callback.answer()
+    stars_amount = int(callback.data.split("_")[1])
     
-    prices = [LabeledPrice(label="Пополнение баланса shvecarskyVPN", amount=amount * 100)] # Сумма в копейках
+    prices = [LabeledPrice(label="Звёзды shvecarskyVPN", amount=stars_amount)]
     
     await bot.send_invoice(
         chat_id=callback.from_user.id,
-        title="Пополнение баланса",
-        description=f"Пополнение личного счета shvecarskyVPN на {amount}₽",
-        provider_token=PAYMENT_TOKEN,
-        currency="RUB",
+        title="Пополнение баланса Звёздами",
+        description=f"Пополнение баланса бота на {stars_amount}₽ за {stars_amount} Telegram Stars",
+        provider_token="", # Для Telegram Stars provider_token остается ПУСТЫМ!
+        currency="XTR",
         prices=prices,
-        start_parameter="topup-balance",
-        payload=f"topup_{amount}"
+        start_parameter="topup-stars",
+        payload=f"stars_{stars_amount}"
     )
-    await callback.answer()
 
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
@@ -253,7 +247,7 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
 
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
-    amount = message.successful_payment.total_amount // 100
+    amount = message.successful_payment.total_amount
     user_id = message.from_user.id
     
     with sqlite3.connect(DB_FILE) as conn:
@@ -262,18 +256,24 @@ async def process_successful_payment(message: types.Message):
         conn.commit()
         
     await message.answer(
-        f"🎉 **Оплата прошла успешно!**\n\n"
+        f"🎉 **Оплата заездами прошла успешно!**\n\n"
         f"Ваш баланс пополнен на **{amount}₽**.\n"
-        f"Теперь вы можете перейти в каталог и приобрести подписку.",
+        f"Теперь вы можете приобрести подписку в каталоге.",
         reply_markup=main_menu_kb(),
         parse_mode="Markdown"
     )
 
+# --- ЛИЧНЫЙ КАБИНЕТ С ИСПРАВЛЕНИЕМ ЗАВИСАНИЯ ---
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
 async def profile_handler(event: types.Message | types.CallbackQuery):
     user_id = event.from_user.id
     user = get_user(user_id)
+    
+    if not user:
+        add_user(user_id)
+        user = (0, None)
+        
     bot_info = await bot.me()
     ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
@@ -287,8 +287,11 @@ async def profile_handler(event: types.Message | types.CallbackQuery):
     )
     
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(text, reply_markup=profile_kb(), parse_mode="Markdown")
         await event.answer()
+        try:
+            await event.message.edit_text(text, reply_markup=profile_kb(), parse_mode="Markdown")
+        except Exception:
+            await event.message.answer(text, reply_markup=profile_kb(), parse_mode="Markdown")
     else:
         await event.answer(text, reply_markup=profile_kb(), parse_mode="Markdown")
 
@@ -297,13 +300,14 @@ async def profile_handler(event: types.Message | types.CallbackQuery):
 async def help_handler(event: types.Message | types.CallbackQuery):
     text = f"{HAPP_INSTRUCTION}"
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
         await event.answer()
+        await event.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
     else:
         await event.answer(text, reply_markup=back_kb(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery):
+    await callback.answer()
     text = (
         "💎 **Добро пожаловать в shvecarskyVPN!**\n\n"
         "Мы предоставляем высокоскоростное премиум-подключение к интернету с полной анонимностью и без ограничений по скорости.\n\n"
@@ -315,7 +319,6 @@ async def back_main(callback: types.CallbackQuery):
         "Выберите нужное действие из меню ниже:"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="Markdown")
-    await callback.answer()
 
 # --- АДМИН ПАНЕЛЬ ---
 @dp.message(Command("addkey"), F.from_user.id == ADMIN_ID)
