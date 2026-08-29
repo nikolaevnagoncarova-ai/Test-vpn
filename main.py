@@ -5,9 +5,10 @@ import sqlite3
 from aiohttp import web, ClientSession
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 DB_FILE = "vpn_shop.db"
 
@@ -16,7 +17,6 @@ dp = Dispatcher()
 
 REF_BONUS = 30
 
-# Тарифы и их стоимости
 TARIFS = {
     "1": {"name": "Подписка на 1 месяц", "price": 1, "months": 1},
     "3": {"name": "Подписка на 3 месяца", "price": 3, "months": 3}
@@ -89,8 +89,15 @@ def confirm_kb(tarif_id: str):
 
 def profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup")],
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
         [InlineKeyboardButton(text="« Назад", callback_data="back_main")]
+    ])
+
+def topup_amounts_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1₽ (Тест)", callback_data="pay_1"), InlineKeyboardButton(text="10₽", callback_data="pay_10")],
+        [InlineKeyboardButton(text="100₽", callback_data="pay_100"), InlineKeyboardButton(text="300₽", callback_data="pay_300")],
+        [InlineKeyboardButton(text="« Назад в профиль", callback_data="profile")]
     ])
 
 def back_kb():
@@ -98,7 +105,6 @@ def back_kb():
         [InlineKeyboardButton(text="« Назад", callback_data="back_main")]
     ])
 
-# --- ИНСТРУКЦИЯ HAPP ---
 HAPP_INSTRUCTION = (
     "📌 **Инструкция по настройке shvecarskyVPN в Happ:**\n\n"
     "1. Нажмите на скопированный ключ выше, чтобы сохранить его.\n"
@@ -178,7 +184,6 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
         
-        # Ищем ключ под выбранный период
         cur.execute("SELECT id, key_data FROM keys WHERE is_sold = 0 AND duration = ? LIMIT 1", (tarif["months"],))
         key = cur.fetchone()
         
@@ -187,14 +192,12 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
             return
             
         if user[0] < tarif["price"]:
-            await callback.answer(f"❌ Недостаточно средств на балансе. Требуется: {tarif['price']}₽", show_alert=True)
+            await callback.answer(f"❌ Недостаточно средств на балансе. Пополните баланс в профиле!", show_alert=True)
             return
         
-        # Списание и обновление статуса
         cur.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (tarif["price"], user_id))
         cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
         
-        # Бонус рефералу
         if user[1]:
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REF_BONUS, user[1]))
             try: await bot.send_message(user[1], f"🎉 Ваш реферал купил VPN! Вам начислено {REF_BONUS}₽.")
@@ -213,6 +216,59 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
     await callback.answer()
 
+# --- ПОПОЛНЕНИЕ БАЛАНСА ЧЕРЕЗ ЮКАССУ ---
+@dp.callback_query(F.data == "topup_menu")
+async def topup_menu_handler(callback: types.CallbackQuery):
+    text = (
+        "💳 **Пополнение баланса (ЮKassa)**\n\n"
+        "Выберите сумму пополнения из предложенных вариантов ниже:"
+    )
+    await callback.message.edit_text(text, reply_markup=topup_amounts_kb(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("pay_"))
+async def pay_invoice_handler(callback: types.CallbackQuery):
+    if not PAYMENT_TOKEN:
+        return await callback.answer("⚠️ Оплата временно недоступна (не настроен PAYMENT_TOKEN).", show_alert=True)
+        
+    amount = int(callback.data.split("_")[1])
+    
+    prices = [LabeledPrice(label="Пополнение баланса shvecarskyVPN", amount=amount * 100)] # Сумма в копейках
+    
+    await bot.send_invoice(
+        chat_id=callback.from_user.id,
+        title="Пополнение баланса",
+        description=f"Пополнение личного счета shvecarskyVPN на {amount}₽",
+        provider_token=PAYMENT_TOKEN,
+        currency="RUB",
+        prices=prices,
+        start_parameter="topup-balance",
+        payload=f"topup_{amount}"
+    )
+    await callback.answer()
+
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: types.Message):
+    amount = message.successful_payment.total_amount // 100
+    user_id = message.from_user.id
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+        conn.commit()
+        
+    await message.answer(
+        f"🎉 **Оплата прошла успешно!**\n\n"
+        f"Ваш баланс пополнен на **{amount}₽**.\n"
+        f"Теперь вы можете перейти в каталог и приобрести подписку.",
+        reply_markup=main_menu_kb(),
+        parse_mode="Markdown"
+    )
+
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
 async def profile_handler(event: types.Message | types.CallbackQuery):
@@ -227,7 +283,7 @@ async def profile_handler(event: types.Message | types.CallbackQuery):
         f"💰 Ваш баланс: **{user[0]}₽**\n\n"
         f"🤝 **Партнерская система:**\n"
         f"Приглашайте друзей и получайте бонусом **{REF_BONUS}₽** на свой баланс за каждую их покупку!\n\n"
-        f"Ваша реферальная ссылка:\n`{ref_link}`"
+        f"Ваша ссылка:\n`{ref_link}`"
     )
     
     if isinstance(event, types.CallbackQuery):
@@ -261,29 +317,15 @@ async def back_main(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="Markdown")
     await callback.answer()
 
-@dp.callback_query(F.data == "topup")
-async def topup_dummy(callback: types.CallbackQuery):
-    await callback.answer("💳 Модуль автоматической оплаты подключается. Используйте администратора для пополнения.", show_alert=True)
-
 # --- АДМИН ПАНЕЛЬ ---
 @dp.message(Command("addkey"), F.from_user.id == ADMIN_ID)
 async def admin_add_key(message: types.Message, command: CommandObject):
     if not command.args:
-        return await message.answer(
-            "⚠️ **Формат команды:**\n`/addkey [месяцы] [ключ]`\n\n"
-            "Пример на 1 месяц:\n`/addkey 1 vless://ключ123`\n"
-            "Пример на 3 месяца:\n`/addkey 3 vless://ключ123`", 
-            parse_mode="Markdown"
-        )
-    
+        return await message.answer("⚠️ Формат: `/addkey [месяцы] [ключ]`", parse_mode="Markdown")
     try:
         args = command.args.split(maxsplit=1)
         duration = int(args[0])
         key_data = args[1].strip()
-        
-        if duration not in [1, 3]:
-            return await message.answer("❌ Укажите длительность 1 или 3 месяца.")
-
         with sqlite3.connect(DB_FILE) as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO keys (key_data, duration) VALUES (?, ?)", (key_data, duration))
@@ -292,32 +334,23 @@ async def admin_add_key(message: types.Message, command: CommandObject):
     except sqlite3.IntegrityError:
         await message.answer("❌ Этот ключ уже есть в базе.")
     except Exception:
-        await message.answer("❌ Ошибка формата. Пример: `/addkey 1 vless://ссылка`", parse_mode="Markdown")
+        await message.answer("❌ Ошибка формата.", parse_mode="Markdown")
 
 @dp.message(Command("givemoney"), F.from_user.id == ADMIN_ID)
 async def admin_give_money(message: types.Message, command: CommandObject):
     if not command.args:
         return await message.answer("⚠️ Формат: `/givemoney [ID] [Сумма]`", parse_mode="Markdown")
-    
     try:
         args = command.args.split()
         target_id = int(args[0])
         amount = int(args[1])
-        
         with sqlite3.connect(DB_FILE) as conn:
             cur = conn.cursor()
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_id))
-            if cur.rowcount == 0:
-                return await message.answer("❌ Пользователь с таким ID не найден.")
             conn.commit()
-            
-        await message.answer(f"✅ Успешно выдано **{amount}₽** пользователю `{target_id}`.", parse_mode="Markdown")
-        try:
-            await bot.send_message(target_id, f"💰 Ваш баланс пополнен на **{amount}₽**!", parse_mode="Markdown")
-        except: pass
-            
-    except (ValueError, IndexError):
-        await message.answer("❌ Ошибка формата. Пример: `/givemoney 123456789 10`", parse_mode="Markdown")
+        await message.answer(f"✅ Выдано **{amount}₽** пользователю `{target_id}`.", parse_mode="Markdown")
+    except Exception:
+        await message.answer("❌ Ошибка формата.", parse_mode="Markdown")
 
 # --- WEB СЕРВЕР RENDER ---
 async def handle_ping(request):
