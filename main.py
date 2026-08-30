@@ -13,6 +13,12 @@ from aiogram.exceptions import TelegramAPIError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "GOROSHEK-ADMIN-777")
+
+# Данные для Platega (лучше вынести в Environment Variables на Render)
+PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
+PLATEGA_SECRET_KEY = os.getenv("PLATEGA_SECRET_KEY", "YOUR_SECRET_KEY")
+PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io")
+
 DB_FILE = "goroshek_vpn.db"
 
 bot = Bot(token=BOT_TOKEN)
@@ -26,7 +32,7 @@ TARIFS = {
     "12": {"name": "Подписка на 12 месяцев", "price": 979.0, "months": 12}
 }
 
-# --- МАШИНА СОСТОЯНИЙ (FSM) ДЛЯ АДМИНКИ ---
+# --- МАШИНА СОСТОЯНИЙ (FSM) ---
 class AdminStates(StatesGroup):
     broadcast_text = State()
     give_money_user = State()
@@ -36,6 +42,9 @@ class AdminStates(StatesGroup):
     give_admin_user = State()
     create_key_duration = State()
     create_key_data = State()
+
+class TopUpStates(StatesGroup):
+    custom_amount = State()
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -52,7 +61,6 @@ def init_db():
                 key_data TEXT DEFAULT NULL
             )
         """)
-        # Миграция старой базы (если отсутствуют колоночки sub_expires или key_data)
         cursor.execute("PRAGMA table_info(users)")
         columns = [col[1] for col in cursor.fetchall()]
         if "sub_expires" not in columns:
@@ -108,7 +116,7 @@ def get_user_by_username(username: str):
         cur.execute("SELECT user_id, balance, is_admin FROM users WHERE LOWER(username) = LOWER(?)", (clean_username,))
         return cur.fetchone()
 
-# --- ПЕРЕХВАТЧИК (MIDDLEWARE) ДЛЯ ОБНОВЛЕНИЯ ДАННЫХ ---
+# --- ПЕРЕХВАТЧИК (MIDDLEWARE) ---
 class UserUpdateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         user = getattr(event, "from_user", None)
@@ -128,7 +136,7 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- КЛАВИАТУРЫ (ПОЛЬЗОВАТЕЛИ) ---
+# --- КЛАВИАТУРЫ ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🟢 Купить подписку", callback_data="catalog")],
@@ -136,8 +144,7 @@ def main_menu_kb():
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
             InlineKeyboardButton(text="👥 Рефералы", callback_data="referral_menu")
         ],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="help")],
-        [InlineKeyboardButton(text="📄 Польз.Соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")]
+        [InlineKeyboardButton(text="📖 Инструкция", callback_data="help")]
     ])
 
 def catalog_kb():
@@ -160,6 +167,7 @@ def profile_kb(has_sub: bool):
     if has_sub:
         kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
     kb.append([InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")])
+    kb.append([InlineKeyboardButton(text="📄 Польз.Соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")])
     kb.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -168,11 +176,26 @@ def referral_kb():
         [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
     ])
 
-def topup_amounts_kb():
+def topup_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Пополнить через Platega (Рубли)", callback_data="topup_platega_menu")],
+        [InlineKeyboardButton(text="⭐️ Пополнить через Telegram Stars", callback_data="topup_stars_menu")],
+        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile")]
+    ])
+
+def topup_platega_amounts_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="119 ₽", callback_data="platega_pay_119"), InlineKeyboardButton(text="309 ₽", callback_data="platega_pay_309")],
+        [InlineKeyboardButton(text="589 ₽", callback_data="platega_pay_589"), InlineKeyboardButton(text="979 ₽", callback_data="platega_pay_979")],
+        [InlineKeyboardButton(text="✍️ Ввести свою сумму", callback_data="platega_custom_amount")],
+        [InlineKeyboardButton(text="◀️ Назад к выбору метода", callback_data="topup_menu")]
+    ])
+
+def topup_stars_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="119 ⭐️", callback_data="paystars_119"), InlineKeyboardButton(text="309 ⭐️", callback_data="paystars_309")],
         [InlineKeyboardButton(text="589 ⭐️", callback_data="paystars_589"), InlineKeyboardButton(text="979 ⭐️", callback_data="paystars_979")],
-        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile")]
+        [InlineKeyboardButton(text="◀️ Назад к выбору метода", callback_data="topup_menu")]
     ])
 
 def back_kb():
@@ -180,7 +203,12 @@ def back_kb():
         [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
     ])
 
-# --- КЛАВИАТУРЫ (АДМИН ПАНЕЛЬ) ---
+def cancel_topup_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="topup_platega_menu")]
+    ])
+
+# --- АДМИН ПАНЕЛЬ КЛАВИАТУРЫ ---
 def admin_panel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✉️ Рассылка", callback_data="adm_broadcast"), InlineKeyboardButton(text="🔑 Добавить ключ", callback_data="adm_addkey")],
@@ -202,6 +230,43 @@ HAPP_INSTRUCTION = (
     "4. Выберите пункт <b>«Импорт из буфера обмена»</b>.\n"
     "5. Включите защищенное соединение и наслаждайтесь свободным интернетом."
 )
+
+# --- ФУНКЦИЯ СОЗДАНИЯ ПЛАТЕЖА PLATEGA ---
+async def create_platega_payment(amount: float, user_id: int, username: str):
+    order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
+    headers = {
+        "X-MerchantId": PLATEGA_MERCHANT_ID,
+        "X-Secret": PLATEGA_SECRET_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "paymentDetails": {
+            "amount": amount,
+            "currency": "RUB"
+        },
+        "orderId": order_id,
+        "description": f"Пополнение баланса Горошек VPN на {amount} ₽",
+        "returnUrl": "https://t.me/" + (username if username else "bot"),
+        "failUrl": "https://t.me/" + (username if username else "bot"),
+        "metadata": {
+            "telegram_id": user_id,
+            "amount": amount
+        }
+    }
+
+    async with ClientSession() as session:
+        try:
+            async with session.post(f"{PLATEGA_API_URL}/transaction/create", json=payload, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("paymentUrl") or data.get("url")
+                else:
+                    logging.error(f"Platega error: {await response.text()}")
+                    return None
+        except Exception as e:
+            logging.error(f"Platega connection error: {e}")
+            return None
 
 # --- АВТОРИЗАЦИЯ АДМИНА ---
 @dp.message(Command("claimadmin"))
@@ -253,7 +318,6 @@ async def admin_panel_handler(message: types.Message, state: FSMContext):
 async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer("Действие отменено")
-    # Проверка на права администратора перед отправкой админ-панели, чтобы избежать ошибки "Недостаточно прав"
     user = get_user(callback.from_user.id)
     if not user or user[2] == 0:
         return await callback.message.edit_text("Действие отменено.")
@@ -424,7 +488,8 @@ async def process_create_key_data(message: types.Message, state: FSMContext):
 
 # --- КЛИЕНТСКАЯ ЧАСТЬ ---
 @dp.message(Command("start"))
-async def start_handler(message: types.Message, command: CommandObject):
+async def start_handler(message: types.Message, command: CommandObject, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     username = message.from_user.username
     
@@ -447,7 +512,8 @@ async def start_handler(message: types.Message, command: CommandObject):
     await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "catalog")
-async def catalog_handler(callback: types.CallbackQuery):
+async def catalog_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     text = (
         "🌿 <b>Тарифы Горошек VPN</b>\n\n"
         "Выберите подходящий вариант подписки. Доступ к VPN выдается моментально сразу после подтверждения оплаты.\n"
@@ -486,16 +552,12 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         if user[0] < tarif["price"]:
             return await callback.answer("⚠️ Недостаточно средств на балансе. Пожалуйста, пополните счет.", show_alert=True)
         
-        # Расчет срока действия подписки
         now = datetime.now()
         current_sub_expires = user[3]
         if current_sub_expires:
             try:
                 exp_date = datetime.fromisoformat(current_sub_expires)
-                if exp_date > now:
-                    base_date = exp_date
-                else:
-                    base_date = now
+                base_date = exp_date if exp_date > now else now
             except:
                 base_date = now
         else:
@@ -508,7 +570,6 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
                     (tarif["price"], new_expires_str, key[1], user_id))
         cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
         
-        # Начисление 10% рефереру
         if user[1]:
             bonus_amount = round(tarif["price"] * REF_PERCENT, 2)
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bonus_amount, user[1]))
@@ -526,7 +587,8 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "referral_menu")
-async def referral_menu_handler(callback: types.CallbackQuery):
+async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     user_id = callback.from_user.id
     ref_count = get_referrals_count(user_id)
     bot_info = await bot.me()
@@ -541,10 +603,82 @@ async def referral_menu_handler(callback: types.CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=referral_kb(), parse_mode="HTML")
 
+# --- ПОПОЛНЕНИЕ БАЛАНСА ---
 @dp.callback_query(F.data == "topup_menu")
-async def topup_menu_handler(callback: types.CallbackQuery):
-    text = "💳 <b>Пополнение баланса</b>\n\nВыберите удобную сумму пополнения (1 звезда = 1 рубль):"
-    await callback.message.edit_text(text, reply_markup=topup_amounts_kb(), parse_mode="HTML")
+async def topup_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = "💳 <b>Пополнение баланса</b>\n\nВыберите способ пополнения:"
+    await callback.message.edit_text(text, reply_markup=topup_menu_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "topup_platega_menu")
+async def topup_platega_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = "💳 <b>Пополнение через Platega (Рубли)</b>\n\nВыберите готовую сумму пополнения или введите свою:"
+    await callback.message.edit_text(text, reply_markup=topup_platega_amounts_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("platega_pay_"))
+async def platega_fixed_pay(callback: types.CallbackQuery):
+    amount = float(callback.data.split("_")[2])
+    await process_platega_generation(callback, amount)
+
+@dp.callback_query(F.data == "platega_custom_amount")
+async def platega_custom_amount_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "✍️ <b>Пополнение баланса</b>\n\nВведите сумму для пополнения в рублях (например, <i>150</i> или <i>500</i>):",
+        reply_markup=cancel_topup_kb(),
+        parse_mode="HTML"
+    )
+    await state.set_state(TopUpStates.custom_amount)
+
+@dp.message(TopUpStates.custom_amount)
+async def platega_custom_amount_process(message: types.Message, state: FSMContext):
+    try:
+        amount = float(message.text.replace(",", "."))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        return await message.answer("❌ Неверный формат суммы. Введите корректное число (например, 200):", reply_markup=cancel_topup_kb())
+    
+    await state.clear()
+    
+    # Создаем фейковый callback_query для универсальной отправки ссылки
+    class PseudoCallback:
+        def __init__(self, msg):
+            self.message = msg
+            self.from_user = msg.from_user
+        async def answer(self, *args, **kwargs):
+            pass
+
+    await process_platega_generation(PseudoCallback(message), amount)
+
+async def process_platega_generation(callback, amount: float):
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    
+    wait_msg = await callback.message.answer("⏳ Создаем ссылку на оплату...")
+    payment_url = await create_platega_payment(amount, user_id, username)
+    
+    if not payment_url:
+        return await wait_msg.edit_text("❌ Ошибка создания платежа через Platega. Попробуйте позже.", reply_markup=topup_platega_amounts_kb())
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🔗 Оплатить {amount:.2f} ₽", url=payment_url)],
+        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile")]
+    ])
+    
+    await wait_msg.edit_text(
+        f"💳 <b>Счет на оплату создан!</b>\n\n"
+        f"Сумма: <b>{amount:.2f} ₽</b>\n\n"
+        f"Нажмите кнопку ниже для перехода к оплате. После успешного платежа средства зачислятся автоматически.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "topup_stars_menu")
+async def topup_stars_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = "⭐️ <b>Пополнение через Telegram Stars</b>\n\nВыберите удобную сумму (1 звезда = 1 рубль):"
+    await callback.message.edit_text(text, reply_markup=topup_stars_amounts_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("paystars_"))
 async def pay_stars_handler(callback: types.CallbackQuery):
@@ -589,7 +723,9 @@ async def show_my_key_handler(callback: types.CallbackQuery):
 
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
-async def profile_handler(event: types.Message | types.CallbackQuery):
+async def profile_handler(event: types.Message | types.CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
     user_id = event.from_user.id
     user = get_user(user_id)
     balance = user[0]
@@ -628,14 +764,17 @@ async def profile_handler(event: types.Message | types.CallbackQuery):
 
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help")
-async def help_handler(event: types.Message | types.CallbackQuery):
+async def help_handler(event: types.Message | types.CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
     if isinstance(event, types.CallbackQuery):
         await event.message.edit_text(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
     else:
         await event.answer(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "back_main")
-async def back_main(callback: types.CallbackQuery):
+async def back_main(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     text = (
         "🌱 <b>Добро пожаловать в Горошек VPN</b>\n\n"
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
@@ -646,9 +785,39 @@ async def back_main(callback: types.CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
-# --- WEB СЕРВЕР RENDER ---
+# --- WEB СЕРВЕР RENDER (ВКЛЮЧАЯ WEBHOOK PLATEGA) ---
 async def handle_ping(request):
     return web.Response(text="Goroshek VPN is running.")
+
+async def handle_platega_webhook(request):
+    try:
+        data = await request.json()
+        
+        # Проверяем структуру ответа от Platega
+        status = data.get("status")
+        metadata = data.get("metadata", {})
+        telegram_id = metadata.get("telegram_id")
+        amount = metadata.get("amount")
+        
+        if (status == "SUCCESS" or status == "paid") and telegram_id and amount:
+            with sqlite3.connect(DB_FILE) as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (float(amount), int(telegram_id)))
+                conn.commit()
+                
+            try:
+                await bot.send_message(
+                    int(telegram_id),
+                    f"✅ <b>Оплата прошла успешно!</b>\n\nВаш баланс пополнен на <b>{float(amount):.2f} ₽</b>.",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logging.error(f"Failed to send success message to user {telegram_id}: {e}")
+                
+        return web.json_response({"status": "ok"})
+    except Exception as e:
+        logging.error(f"Webhook error: {e}")
+        return web.json_response({"status": "error", "message": str(e)}, status=400)
 
 async def self_ping():
     await asyncio.sleep(10)
@@ -666,10 +835,12 @@ async def main():
     init_db()
     
     await bot.delete_webhook(drop_pending_updates=True)
-    await set_bot_commands(bot)
+    await set_my_commands(bot)
     
     app = web.Application()
     app.router.add_get("/", handle_ping)
+    app.router.add_post("/platega/webhook", handle_platega_webhook)
+    
     runner = web.AppRunner(app)
     await runner.setup()
     
@@ -678,7 +849,7 @@ async def main():
     await site.start()
 
     asyncio.create_task(self_ping())
-    await dp.start_polling(bot, handle_as_tasks=True)
+    await dp.start_polling(bot, hold_as_tasks=True) # type: ignore
 
 if __name__ == "__main__":
     asyncio.run(main())
