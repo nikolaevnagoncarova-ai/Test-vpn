@@ -117,7 +117,6 @@ def get_user_by_username(username: str):
         return cur.fetchone()
 
 # --- ПЕРЕХВАТЧИК (MIDDLEWARE) ---
-# Исправлено: безопасное получение объекта пользователя из данных события (data)
 class UserUpdateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         user = data.get("event_from_user")
@@ -504,9 +503,6 @@ async def start_handler(message: types.Message, command: CommandObject, state: F
     text = (
         "🌱 <b>Добро пожаловать в Горошек VPN</b>\n\n"
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
-        "🟢 Высокая скорость без ограничений трафика\n"
-        "🟢 Стабильный обход любых блокировок\n"
-        "🟢 Мгновенная автоматическая выдача ключа\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
     await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
@@ -777,9 +773,6 @@ async def back_main(callback: types.CallbackQuery, state: FSMContext):
     text = (
         "🌱 <b>Добро пожаловать в Горошек VPN</b>\n\n"
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
-        "🟢 Высокая скорость без ограничений трафика\n"
-        "🟢 Стабильный обход любых блокировок\n"
-        "🟢 Мгновенная автоматическая выдача ключа\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
