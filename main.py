@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import sqlite3
+from datetime import datetime, timedelta
 from aiohttp import web, ClientSession
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, CommandObject
@@ -46,9 +47,19 @@ def init_db():
                 username TEXT,
                 balance REAL DEFAULT 0.0,
                 referrer_id INTEGER,
-                is_admin INTEGER DEFAULT 0
+                is_admin INTEGER DEFAULT 0,
+                sub_expires TEXT DEFAULT NULL,
+                key_data TEXT DEFAULT NULL
             )
         """)
+        # Миграция старой базы (если отсутствуют колоночки sub_expires или key_data)
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "sub_expires" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN sub_expires TEXT DEFAULT NULL")
+        if "key_data" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN key_data TEXT DEFAULT NULL")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +90,7 @@ def update_user_info(user_id: int, username: str, referrer_id: int = None):
 def get_user(user_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT balance, referrer_id, is_admin FROM users WHERE user_id = ?", (user_id,))
+        cur.execute("SELECT balance, referrer_id, is_admin, sub_expires, key_data FROM users WHERE user_id = ?", (user_id,))
         return cur.fetchone()
 
 def get_referrals_count(user_id: int):
@@ -143,11 +154,13 @@ def confirm_kb(tarif_id: str):
         [InlineKeyboardButton(text="❌ Отмена", callback_data="catalog")]
     ])
 
-def profile_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
-    ])
+def profile_kb(has_sub: bool):
+    kb = []
+    if has_sub:
+        kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
+    kb.append([InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")])
+    kb.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def referral_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -239,7 +252,25 @@ async def admin_panel_handler(message: types.Message, state: FSMContext):
 async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer("Действие отменено")
-    await admin_panel_handler(callback.message, state)
+    # Проверка на права администратора перед отправкой админ-панели, чтобы избежать ошибки "Недостаточно прав"
+    user = get_user(callback.from_user.id)
+    if not user or user[2] == 0:
+        return await callback.message.edit_text("Действие отменено.")
+        
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        users_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM keys WHERE is_sold = 0")
+        keys_count = cur.fetchone()[0]
+
+    text = (
+        "🌿 <b>Панель управления Горошек VPN</b>\n\n"
+        f"👥 Всего пользователей: <b>{users_count}</b>\n"
+        f"🔑 Свободных ключей: <b>{keys_count}</b>\n\n"
+        "Выберите необходимое действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=admin_panel_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "adm_broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
@@ -454,7 +485,26 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         if user[0] < tarif["price"]:
             return await callback.answer("⚠️ Недостаточно средств на балансе. Пожалуйста, пополните счет.", show_alert=True)
         
-        cur.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (tarif["price"], user_id))
+        # Расчет срока действия подписки
+        now = datetime.now()
+        current_sub_expires = user[3]
+        if current_sub_expires:
+            try:
+                exp_date = datetime.fromisoformat(current_sub_expires)
+                if exp_date > now:
+                    base_date = exp_date
+                else:
+                    base_date = now
+            except:
+                base_date = now
+        else:
+            base_date = now
+            
+        new_expires = base_date + timedelta(days=tarif["months"] * 30)
+        new_expires_str = new_expires.isoformat()
+
+        cur.execute("UPDATE users SET balance = balance - ?, sub_expires = ?, key_data = ? WHERE user_id = ?", 
+                    (tarif["price"], new_expires_str, key[1], user_id))
         cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
         
         # Начисление 10% рефереру
@@ -522,22 +572,58 @@ async def process_successful_payment(message: types.Message):
         conn.commit()
     await message.answer(f"✅ <b>Баланс успешно пополнен на {amount:.2f} ₽!</b>", reply_markup=main_menu_kb(), parse_mode="HTML")
 
+@dp.callback_query(F.data == "show_my_key")
+async def show_my_key_handler(callback: types.CallbackQuery):
+    user = get_user(callback.from_user.id)
+    key_data = user[4]
+    if not key_data:
+        return await callback.answer("⚠️ У вас нет активного ключа.", show_alert=True)
+    
+    text = (
+        f"🔑 <b>Ваш ключ доступа:</b>\n"
+        f"<code>{key_data}</code>\n\n"
+        f"{HAPP_INSTRUCTION}"
+    )
+    await callback.message.edit_text(text, reply_markup=profile_kb(True), parse_mode="HTML")
+
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
 async def profile_handler(event: types.Message | types.CallbackQuery):
     user_id = event.from_user.id
     user = get_user(user_id)
+    balance = user[0]
+    sub_expires_str = user[3]
+    key_data = user[4]
     
+    sub_status = "❌ Не активна"
+    days_left = 0
+    has_sub = False
+    
+    if sub_expires_str and key_data:
+        try:
+            exp_date = datetime.fromisoformat(sub_expires_str)
+            now = datetime.now()
+            if exp_date > now:
+                delta = exp_date - now
+                days_left = delta.days + (1 if delta.seconds > 0 else 0)
+                sub_status = f"🟢 Активна"
+                has_sub = True
+        except:
+            pass
+
     text = (
         f"👤 <b>Личный кабинет</b>\n\n"
-        f"🆔 Ваш ID: <code>{user_id}</code>\n"
-        f"💰 Баланс: <b>{user[0]:.2f} ₽</b>\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"💳 <b>Баланс:</b> <b>{balance:.2f} ₽</b>\n\n"
+        f"🛡 <b>Статус подписки:</b> {sub_status}\n"
+        f"⏳ <b>Осталось дней:</b> <b>{days_left}</b>\n"
     )
     
+    kb = profile_kb(has_sub)
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(text, reply_markup=profile_kb(), parse_mode="HTML")
+        await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
-        await event.answer(text, reply_markup=profile_kb(), parse_mode="HTML")
+        await event.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help")
