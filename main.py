@@ -140,11 +140,16 @@ async def set_bot_commands(bot: Bot):
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🟢 Купить подписку", callback_data="catalog")],
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
             InlineKeyboardButton(text="👥 Рефералы", callback_data="referral_menu")
         ],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="help")]
+        [
+            InlineKeyboardButton(text="📖 Инструкция", callback_data="help"),
+            InlineKeyboardButton(text="📜 Правила", callback_data="rules")
+        ],
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/IRFIX_Factor")]
     ])
 
 def catalog_kb():
@@ -166,11 +171,15 @@ def profile_kb(has_sub: bool):
     kb = []
     if has_sub:
         kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
-    kb.append([InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")])
-    kb.append([InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")])
-    kb.append([InlineKeyboardButton(text="🔐 Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")])
     kb.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def rules_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")],
+        [InlineKeyboardButton(text="🔐 Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")],
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+    ])
 
 def referral_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -181,7 +190,7 @@ def topup_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Пополнить через Platega (Рубли)", callback_data="topup_platega_menu")],
         [InlineKeyboardButton(text="⭐️ Пополнить через Telegram Stars", callback_data="topup_stars_menu")],
-        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile")]
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
     ])
 
 def topup_platega_amounts_kb():
@@ -658,7 +667,7 @@ async def process_platega_generation(callback, amount: float):
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"🔗 Оплатить {amount:.2f} ₽", url=payment_url)],
-        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile")]
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
     ])
     
     await wait_msg.edit_text(
@@ -756,6 +765,16 @@ async def profile_handler(event: types.Message | types.CallbackQuery, state: FSM
         await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
         await event.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "rules")
+async def rules_handler(callback: types.CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
+    text = (
+        "📜 <b>Правила и юридическая информация</b>\n\n"
+        "Выберите интересующий документ:"
+    )
+    await callback.message.edit_text(text, reply_markup=rules_kb(), parse_mode="HTML")
 
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help")
