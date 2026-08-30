@@ -152,7 +152,7 @@ def main_menu_kb():
         [
             InlineKeyboardButton(text="📖 Инструкция", callback_data="help"),
             InlineKeyboardButton(
-                text="📜 Правила", 
+                text="Правила", 
                 callback_data="rules", 
                 icon_custom_emoji_id="5235562737232291360"
             )
