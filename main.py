@@ -6,13 +6,16 @@ from datetime import datetime, timedelta
 from aiohttp import web, ClientSession
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, CommandObject
-from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "GOROSHEK-ADMIN-777")
+
+# Ваша ссылка на фото меню
+MENU_PHOTO = "https://ibb.co/hRyLQ5Zh"
 
 # Данные для Platega
 PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
@@ -328,7 +331,7 @@ async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext)
     await state.clear()
     user = get_user(callback.from_user.id)
     if not user or user[2] == 0:
-        return await callback.message.edit_text("Действие отменено.")
+        return await callback.message.edit_caption(caption="Действие отменено.")
         
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
@@ -343,11 +346,11 @@ async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext)
         f"🔑 Свободных ключей: <b>{keys_count}</b>\n\n"
         "Выберите необходимое действие:"
     )
-    await callback.message.edit_text(text, reply_markup=admin_panel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=admin_panel_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "adm_broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌿 <b>Рассылка</b>\n\nВведите текст или прикрепите медиа для отправки пользователям:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption="🌿 <b>Рассылка</b>\n\nВведите текст или прикрепите медиа для отправки пользователям:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.broadcast_text)
 
 @dp.message(AdminStates.broadcast_text)
@@ -377,7 +380,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "adm_givemoney")
 async def start_give_money(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌿 <b>Выдача баланса</b>\n\nВведите юзернейм пользователя (например, @username):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption="🌿 <b>Выдача баланса</b>\n\nВведите юзернейм пользователя (например, @username):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.give_money_user)
 
 @dp.message(AdminStates.give_money_user)
@@ -411,7 +414,7 @@ async def process_give_money_amount(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "adm_takemoney")
 async def start_take_money(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌿 <b>Списание баланса</b>\n\nВведите юзернейм пользователя:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption="🌿 <b>Списание баланса</b>\n\nВведите юзернейм пользователя:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.take_money_user)
 
 @dp.message(AdminStates.take_money_user)
@@ -444,7 +447,7 @@ async def process_take_money_amount(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "adm_giveadmin")
 async def start_give_admin(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌿 <b>Выдача прав администратора</b>\n\nВведите юзернейм:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption="🌿 <b>Выдача прав администратора</b>\n\nВведите юзернейм:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.give_admin_user)
 
 @dp.message(AdminStates.give_admin_user)
@@ -466,7 +469,7 @@ async def process_give_admin_user(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "adm_addkey")
 async def start_create_key(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌿 <b>Добавление ключа</b>\n\nВведите срок подписки в месяцах (1, 3, 6 или 12):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption="🌿 <b>Добавление ключа</b>\n\nВведите срок подписки в месяцах (1, 3, 6 или 12):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.create_key_duration)
 
 @dp.message(AdminStates.create_key_duration)
@@ -514,7 +517,7 @@ async def start_handler(message: types.Message, command: CommandObject, state: F
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
-    await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
+    await message.answer_photo(photo=MENU_PHOTO, caption=text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "catalog")
 async def catalog_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -523,7 +526,7 @@ async def catalog_handler(callback: types.CallbackQuery, state: FSMContext):
         "🌿 <b>Тарифы Горошек VPN</b>\n\n"
         "Выберите подходящий вариант подписки. Доступ к VPN выдается моментально сразу после подтверждения оплаты.\n"
     )
-    await callback.message.edit_text(text, reply_markup=catalog_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=catalog_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("select_tarif_"))
 async def select_tarif_handler(callback: types.CallbackQuery):
@@ -537,7 +540,7 @@ async def select_tarif_handler(callback: types.CallbackQuery):
         f"💰 Стоимость: <b>{tarif['price']:.2f} ₽</b>\n\n"
         f"Сумма будет списана с вашего внутреннего баланса в боте."
     )
-    await callback.message.edit_text(text, reply_markup=confirm_kb(tarif_id), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=confirm_kb(tarif_id), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("buy_confirm_"))
 async def buy_confirm_handler(callback: types.CallbackQuery):
@@ -589,7 +592,7 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         f"<code>{key[1]}</code>\n\n"
         f"{HAPP_INSTRUCTION}"
     )
-    await callback.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=back_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "referral_menu")
 async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -606,20 +609,20 @@ async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext
         "Ваша персональная ссылка для приглашений:\n"
         f"<code>{ref_link}</code>"
     )
-    await callback.message.edit_text(text, reply_markup=referral_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=referral_kb(), parse_mode="HTML")
 
 # --- ПОПОЛНЕНИЕ БАЛАНСА ---
 @dp.callback_query(F.data == "topup_menu")
 async def topup_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = "💳 <b>Пополнение баланса</b>\n\nВыберите способ пополнения:"
-    await callback.message.edit_text(text, reply_markup=topup_menu_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=topup_menu_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "topup_platega_menu")
 async def topup_platega_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = "💳 <b>Пополнение через Platega (Рубли)</b>\n\nВыберите готовую сумму пополнения или введите свою:"
-    await callback.message.edit_text(text, reply_markup=topup_platega_amounts_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=topup_platega_amounts_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("platega_pay_"))
 async def platega_fixed_pay(callback: types.CallbackQuery):
@@ -628,8 +631,8 @@ async def platega_fixed_pay(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "platega_custom_amount")
 async def platega_custom_amount_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "✍️ <b>Пополнение баланса</b>\n\nВведите сумму для пополнения в рублях (например, <i>150</i> или <i>500</i>):",
+    await callback.message.edit_caption(
+        caption="✍️ <b>Пополнение баланса</b>\n\nВведите сумму для пополнения в рублях (например, <i>150</i> или <i>500</i>):",
         reply_markup=cancel_topup_kb(),
         parse_mode="HTML"
     )
@@ -682,7 +685,7 @@ async def process_platega_generation(callback, amount: float):
 async def topup_stars_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = "⭐️ <b>Пополнение через Telegram Stars</b>\n\nВыберите удобную сумму (1 звезда = 1 рубль):"
-    await callback.message.edit_text(text, reply_markup=topup_stars_amounts_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=topup_stars_amounts_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("paystars_"))
 async def pay_stars_handler(callback: types.CallbackQuery):
@@ -723,7 +726,7 @@ async def show_my_key_handler(callback: types.CallbackQuery):
         f"<code>{key_data}</code>\n\n"
         f"{HAPP_INSTRUCTION}"
     )
-    await callback.message.edit_text(text, reply_markup=profile_kb(True), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=profile_kb(True), parse_mode="HTML")
 
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
@@ -762,9 +765,9 @@ async def profile_handler(event: types.Message | types.CallbackQuery, state: FSM
     
     kb = profile_kb(has_sub)
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await event.message.edit_caption(caption=text, reply_markup=kb, parse_mode="HTML")
     else:
-        await event.answer(text, reply_markup=kb, parse_mode="HTML")
+        await event.answer_photo(photo=MENU_PHOTO, caption=text, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "rules")
 async def rules_handler(callback: types.CallbackQuery, state: FSMContext = None):
@@ -774,7 +777,7 @@ async def rules_handler(callback: types.CallbackQuery, state: FSMContext = None)
         "📜 <b>Правила и юридическая информация</b>\n\n"
         "Выберите интересующий документ:"
     )
-    await callback.message.edit_text(text, reply_markup=rules_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=rules_kb(), parse_mode="HTML")
 
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help")
@@ -782,9 +785,9 @@ async def help_handler(event: types.Message | types.CallbackQuery, state: FSMCon
     if state:
         await state.clear()
     if isinstance(event, types.CallbackQuery):
-        await event.message.edit_text(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
+        await event.message.edit_caption(caption=HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
     else:
-        await event.answer(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
+        await event.answer_photo(photo=MENU_PHOTO, caption=HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery, state: FSMContext):
@@ -794,7 +797,7 @@ async def back_main(callback: types.CallbackQuery, state: FSMContext):
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
-    await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 # --- WEB СЕРВЕР RENDER (ВКЛЮЧАЯ WEBHOOK PLATEGA) ---
 async def handle_ping(request):
