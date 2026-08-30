@@ -136,7 +136,8 @@ def main_menu_kb():
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
             InlineKeyboardButton(text="👥 Рефералы", callback_data="referral_menu")
         ],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="help")]
+        [InlineKeyboardButton(text="📖 Инструкция", callback_data="help")],
+        [InlineKeyboardButton(text="📄 Польз.Соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")]
     ])
 
 def catalog_kb():
