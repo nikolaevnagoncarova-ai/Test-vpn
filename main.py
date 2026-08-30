@@ -641,7 +641,6 @@ async def platega_custom_amount_process(message: types.Message, state: FSMContex
     
     await state.clear()
     
-    # Создаем фейковый callback_query для универсальной отправки ссылки
     class PseudoCallback:
         def __init__(self, msg):
             self.message = msg
@@ -793,7 +792,6 @@ async def handle_platega_webhook(request):
     try:
         data = await request.json()
         
-        # Проверяем структуру ответа от Platega
         status = data.get("status")
         metadata = data.get("metadata", {})
         telegram_id = metadata.get("telegram_id")
@@ -822,7 +820,7 @@ async def handle_platega_webhook(request):
 async def self_ping():
     await asyncio.sleep(10)
     port = os.getenv("PORT", "8080")
-    render_url = os.getenv("RENDER_EXTERNAL_URL", f"http://127.0.0.1:{port}")
+    render_url = os.getenv("RENDER_EXTERNAL_URL", f"http://127.1:{port}")
     async with ClientSession() as session:
         while True:
             try:
@@ -830,13 +828,7 @@ async def self_ping():
             except: pass
             await asyncio.sleep(600)
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    init_db()
-    
-    await bot.delete_webhook(drop_pending_updates=True)
-    await set_my_commands(bot)
-    
+async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_ping)
     app.router.add_post("/platega/webhook", handle_platega_webhook)
@@ -847,9 +839,24 @@ async def main():
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    logging.info(f"Web server started on port {port}")
+    
+    while True:
+        await asyncio.sleep(3600)
 
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    init_db()
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    await set_my_commands(bot)
+    
     asyncio.create_task(self_ping())
-    await dp.start_polling(bot, hold_as_tasks=True) # type: ignore
+    
+    await asyncio.gather(
+        start_web_server(),
+        dp.start_polling(bot, hold_as_tasks=True) # type: ignore
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
