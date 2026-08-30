@@ -14,10 +14,8 @@ from aiogram.exceptions import TelegramAPIError
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "GOROSHEK-ADMIN-777")
 
-# Ваша ссылка на фото меню
 MENU_PHOTO = "https://ibb.co/hRyLQ5Zh"
 
-# Данные для Platega
 PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
 PLATEGA_SECRET_KEY = os.getenv("PLATEGA_SECRET_KEY", "YOUR_SECRET_KEY")
 PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io")
@@ -142,7 +140,8 @@ def main_menu_kb():
             InlineKeyboardButton(
                 text="Купить подписку", 
                 callback_data="catalog", 
-                icon_custom_emoji_id="5233576400757239803"
+                icon_custom_emoji_id="5233576400757239803",
+                style="success"
             )
         ],
         [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
@@ -245,7 +244,6 @@ HAPP_INSTRUCTION = (
     "5. Включите защищенное соединение и наслаждайтесь свободным интернетом."
 )
 
-# --- УТИЛИТЫ ДЛЯ ПЕРЕКЛЮЧЕНИЯ ИНТЕРФЕЙСА ---
 async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
     if callback.message.photo:
         await callback.message.delete()
@@ -253,7 +251,6 @@ async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup
     else:
         await callback.message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
-# --- ФУНКЦИЯ СОЗДАНИЯ ПЛАТЕЖА PLATEGA ---
 async def create_platega_payment(amount: float, user_id: int, username: str):
     order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
     headers = {
@@ -290,7 +287,6 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
             logging.error(f"Platega connection error: {e}")
             return None
 
-# --- АВТОРИЗАЦИЯ АДМИНА ---
 @dp.message(Command("claimadmin"))
 async def claim_admin_handler(message: types.Message, command: CommandObject):
     code = command.args
@@ -313,7 +309,6 @@ async def claim_admin_handler(message: types.Message, command: CommandObject):
         else:
             await message.answer("Неверный код.")
 
-# --- АДМИН ПАНЕЛЬ ---
 @dp.message(Command("admin"))
 async def admin_panel_handler(message: types.Message, state: FSMContext):
     user = get_user(message.from_user.id)
@@ -507,7 +502,6 @@ async def process_create_key_data(message: types.Message, state: FSMContext):
     finally:
         await state.clear()
 
-# --- КЛИЕНТСКАЯ ЧАСТЬ ---
 @dp.message(Command("start"))
 async def start_handler(message: types.Message, command: CommandObject, state: FSMContext):
     await state.clear()
@@ -621,7 +615,6 @@ async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext
     )
     await go_to_text_menu(callback, text, referral_kb())
 
-# --- ПОПОЛНЕНИЕ БАЛАНСА ---
 @dp.callback_query(F.data == "topup_menu")
 async def topup_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -810,7 +803,6 @@ async def back_main(callback: types.CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_caption(caption=text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
-# --- WEB СЕРВЕР RENDER (ВКЛЮЧАЯ WEBHOOK PLATEGA) ---
 async def handle_ping(request):
     return web.Response(text="Goroshek VPN is running.")
 
