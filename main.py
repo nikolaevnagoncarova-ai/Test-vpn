@@ -117,9 +117,10 @@ def get_user_by_username(username: str):
         return cur.fetchone()
 
 # --- ПЕРЕХВАТЧИК (MIDDLEWARE) ---
+# Исправлено: безопасное получение объекта пользователя из данных события (data)
 class UserUpdateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
-        user = getattr(event, "from_user", None)
+        user = data.get("event_from_user")
         if user:
             update_user_info(user.id, user.username)
         return await handler(event, data)
@@ -167,7 +168,8 @@ def profile_kb(has_sub: bool):
     if has_sub:
         kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
     kb.append([InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")])
-    kb.append([InlineKeyboardButton(text="📄 Польз.Соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")])
+    kb.append([InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")])
+    kb.append([InlineKeyboardButton(text="🔐 Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")])
     kb.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -208,7 +210,6 @@ def cancel_topup_kb():
         [InlineKeyboardButton(text="❌ Отмена", callback_data="topup_platega_menu")]
     ])
 
-# --- АДМИН ПАНЕЛЬ КЛАВИАТУРЫ ---
 def admin_panel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✉️ Рассылка", callback_data="adm_broadcast"), InlineKeyboardButton(text="🔑 Добавить ключ", callback_data="adm_addkey")],
@@ -317,7 +318,6 @@ async def admin_panel_handler(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "adm_cancel")
 async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.answer("Действие отменено")
     user = get_user(callback.from_user.id)
     if not user or user[2] == 0:
         return await callback.message.edit_text("Действие отменено.")
@@ -853,11 +853,13 @@ async def main():
     
     asyncio.create_task(self_ping())
     
-    # Исправлено: запуск веб-сервера и пуллинга без нераскрытых сессий и падений
     await asyncio.gather(
         start_web_server(),
         dp.start_polling(bot, handle_as_tasks=True)
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped!")
