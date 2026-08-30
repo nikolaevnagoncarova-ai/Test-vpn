@@ -138,7 +138,13 @@ async def set_bot_commands(bot: Bot):
 # --- КЛАВИАТУРЫ ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🟢 Купить подписку", callback_data="catalog")],
+        [
+            InlineKeyboardButton(
+                text="Купить подписку", 
+                callback_data="catalog", 
+                icon_custom_emoji_id="5233576400757239803"
+            )
+        ],
         [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
@@ -241,7 +247,6 @@ HAPP_INSTRUCTION = (
 
 # --- УТИЛИТЫ ДЛЯ ПЕРЕКЛЮЧЕНИЯ ИНТЕРФЕЙСА ---
 async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
-    """Удаляет фото при переходе в другие вкладки и отправляет только текст."""
     if callback.message.photo:
         await callback.message.delete()
         await callback.message.answer(text=text, reply_markup=reply_markup, parse_mode="HTML")
@@ -799,7 +804,6 @@ async def back_main(callback: types.CallbackQuery, state: FSMContext):
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
-    # Возвращаем фото при заходе в главное меню
     if not callback.message.photo:
         await callback.message.delete()
         await callback.message.answer_photo(photo=MENU_PHOTO, caption=text, reply_markup=main_menu_kb(), parse_mode="HTML")
