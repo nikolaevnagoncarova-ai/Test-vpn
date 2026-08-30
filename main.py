@@ -6,41 +6,50 @@ from aiohttp import web, ClientSession
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramAPIError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+# Секретный код для первого получения админки. Можно задать в переменных окружения Render
+SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "SHVECARSKY-ADMIN-777")
 DB_FILE = "vpn_shop.db"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 REF_BONUS = 30
-
 TARIFS = {
     "1": {"name": "Подписка на 1 месяц", "price": 1, "months": 1},
     "3": {"name": "Подписка на 3 месяца", "price": 3, "months": 3}
 }
 
-# --- МЕНЮ КОМАНД ---
-async def set_bot_commands(bot: Bot):
-    commands = [
-        BotCommand(command="start", description="Главное меню"),
-        BotCommand(command="profile", description="Профиль и баланс"),
-        BotCommand(command="help", description="Инструкция по настройке")
-    ]
-    await bot.set_my_commands(commands)
+# --- МАШИНА СОСТОЯНИЙ (FSM) ДЛЯ АДМИНКИ ---
+class AdminStates(StatesGroup):
+    broadcast_text = State()
+    give_money_user = State()
+    give_money_amount = State()
+    take_money_user = State()
+    take_money_amount = State()
+    give_admin_user = State()
+    create_key_duration = State()
+    create_key_data = State()
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
+        # Таблица пользователей
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
+                username TEXT,
                 balance INTEGER DEFAULT 0,
-                referrer_id INTEGER
+                referrer_id INTEGER,
+                is_admin INTEGER DEFAULT 0
             )
         """)
+        # Таблица ключей
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,24 +58,54 @@ def init_db():
                 is_sold INTEGER DEFAULT 0
             )
         """)
+        # Таблица системных настроек (для одноразового кода)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('admin_code_used', '0')")
         conn.commit()
 
-def get_user(user_id):
+def update_user_info(user_id: int, username: str, referrer_id: int = None):
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT balance, referrer_id FROM users WHERE user_id = ?", (user_id,))
+        # Проверяем существование
+        cur.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        if not cur.fetchone():
+            cur.execute("INSERT INTO users (user_id, username, referrer_id) VALUES (?, ?, ?)", (user_id, username, referrer_id))
+        else:
+            cur.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
+        conn.commit()
+
+def get_user(user_id: int):
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance, referrer_id, is_admin FROM users WHERE user_id = ?", (user_id,))
         return cur.fetchone()
 
-def add_user(user_id, referrer_id=None):
+def get_user_by_username(username: str):
+    clean_username = username.replace("@", "").strip()
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        cur.execute("INSERT OR IGNORE INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, referrer_id))
-        conn.commit()
+        cur.execute("SELECT user_id, balance, is_admin FROM users WHERE LOWER(username) = LOWER(?)", (clean_username,))
+        return cur.fetchone()
 
-# --- КЛАВИАТУРЫ ---
+# --- МЕНЮ КОМАНД ---
+async def set_bot_commands(bot: Bot):
+    commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="profile", description="Профиль и баланс"),
+        BotCommand(command="help", description="Инструкция по настройке"),
+        BotCommand(command="admin", description="Панель администратора")
+    ]
+    await bot.set_my_commands(commands)
+
+# --- КЛАВИАТУРЫ (ПОЛЬЗОВАТЕЛИ) ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Купить подписку VPN", callback_data="catalog")],
+        [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="catalog")],
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
             InlineKeyboardButton(text="📖 Инструкция", callback_data="help")
@@ -77,96 +116,317 @@ def catalog_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚡️ 1 месяц — 1₽", callback_data="select_tarif_1")],
         [InlineKeyboardButton(text="🚀 3 месяца — 3₽", callback_data="select_tarif_3")],
-        [InlineKeyboardButton(text="« Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="« Вернуться", callback_data="back_main")]
     ])
 
 def confirm_kb(tarif_id: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить и оплатить", callback_data=f"buy_confirm_{tarif_id}")],
+        [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"buy_confirm_{tarif_id}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="catalog")]
     ])
 
 def profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐️ Пополнить баланс (Telegram Stars)", callback_data="topup_menu")],
-        [InlineKeyboardButton(text="« Назад", callback_data="back_main")]
+        [InlineKeyboardButton(text="⭐️ Пополнить баланс", callback_data="topup_menu")],
+        [InlineKeyboardButton(text="« Вернуться", callback_data="back_main")]
     ])
 
 def topup_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 ⭐️ (Тест)", callback_data="paystars_1"), InlineKeyboardButton(text="10 ⭐️", callback_data="paystars_10")],
+        [InlineKeyboardButton(text="1 ⭐️", callback_data="paystars_1"), InlineKeyboardButton(text="10 ⭐️", callback_data="paystars_10")],
         [InlineKeyboardButton(text="50 ⭐️", callback_data="paystars_50"), InlineKeyboardButton(text="100 ⭐️", callback_data="paystars_100")],
         [InlineKeyboardButton(text="« Назад в профиль", callback_data="profile")]
     ])
 
 def back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Назад", callback_data="back_main")]
+        [InlineKeyboardButton(text="« Вернуться", callback_data="back_main")]
+    ])
+
+# --- КЛАВИАТУРЫ (АДМИН ПАНЕЛЬ) ---
+def admin_panel_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✉️ Рассылка", callback_data="adm_broadcast"), InlineKeyboardButton(text="🔑 Создать ключи", callback_data="adm_addkey")],
+        [InlineKeyboardButton(text="💰 Выдать баланс", callback_data="adm_givemoney"), InlineKeyboardButton(text="📉 Забрать баланс", callback_data="adm_takemoney")],
+        [InlineKeyboardButton(text="🛡 Назначить админа", callback_data="adm_giveadmin")],
+        [InlineKeyboardButton(text="❌ Закрыть панель", callback_data="back_main")]
+    ])
+
+def admin_cancel_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отменить действие", callback_data="adm_cancel")]
     ])
 
 HAPP_INSTRUCTION = (
-    "📌 **Инструкция по настройке shvecarskyVPN в Happ:**\n\n"
-    "1. Нажмите на скопированный ключ выше, чтобы сохранить его.\n"
-    "2. Установите и откройте приложение **Happ** (доступно в App Store / Google Play).\n"
-    "3. В правом верхнем углу нажмите **«+»**.\n"
-    "4. Выберите пункт **«Импорт из буфера обмена»** (Import from Clipboard).\n"
-    "5. Переключите тумблер для активации защищенного соединения."
+    "📌 **Инструкция по подключению:**\n\n"
+    "1. Скопируйте ваш персональный ключ.\n"
+    "2. Установите приложение **Happ** (App Store / Google Play).\n"
+    "3. Нажмите **«+»** в правом верхнем углу приложения.\n"
+    "4. Выберите **«Импорт из буфера обмена»** (Import from Clipboard).\n"
+    "5. Переключите тумблер для запуска."
 )
 
-# --- КЛИЕНТСКАЯ ЧАСТЬ ---
+# --- ПЕРЕХВАТЧИК (АВТО-ОБНОВЛЕНИЕ ДАННЫХ) ---
+@dp.message()
+async def auto_update_user_middleware(message: types.Message, handler=None):
+    if message.from_user:
+        update_user_info(message.from_user.id, message.from_user.username)
+    return await handler(message) if handler else None
+
+# --- АВТОРИЗАЦИЯ АДМИНА ---
+@dp.message(Command("claimadmin"))
+async def claim_admin_handler(message: types.Message, command: CommandObject):
+    code = command.args
+    if not code:
+        return await message.answer("Укажите секретный ключ доступа.")
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM config WHERE key = 'admin_code_used'")
+        is_used = cur.fetchone()[0]
+        
+        if is_used == '1':
+            return await message.answer("⚠️ Одноразовый код уже был использован.")
+            
+        if code == SECRET_ADMIN_CODE:
+            cur.execute("UPDATE config SET value = '1' WHERE key = 'admin_code_used'")
+            cur.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (message.from_user.id,))
+            conn.commit()
+            await message.answer("✅ **Права администратора успешно получены!**\n\nИспользуйте команду /admin для входа в панель управления.", parse_mode="Markdown")
+        else:
+            await message.answer("❌ Неверный ключ доступа.")
+
+# --- АДМИН ПАНЕЛЬ ---
+@dp.message(Command("admin"))
+async def admin_panel_handler(message: types.Message, state: FSMContext):
+    user = get_user(message.from_user.id)
+    if not user or user[2] == 0:
+        return await message.answer("У вас нет прав доступа к этому разделу.")
+        
+    await state.clear()
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        users_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM keys WHERE is_sold = 0")
+        keys_count = cur.fetchone()[0]
+
+    text = (
+        "🛡 **Панель администратора**\n\n"
+        f"👥 Всего пользователей: **{users_count}**\n"
+        f"🔑 Доступных ключей: **{keys_count}**\n\n"
+        "Выберите необходимое действие:"
+    )
+    await message.answer(text, reply_markup=admin_panel_kb(), parse_mode="Markdown")
+
+@dp.callback_query(F.data == "adm_cancel")
+async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer("Действие отменено.")
+    await admin_panel_handler(callback.message, state)
+
+# 1. РАССЫЛКА
+@dp.callback_query(F.data == "adm_broadcast")
+async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Отправьте сообщение для рассылки всем пользователям бота:", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.broadcast_text)
+
+@dp.message(AdminStates.broadcast_text)
+async def process_broadcast(message: types.Message, state: FSMContext):
+    await state.clear()
+    text_to_send = message.text or message.caption
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+
+    await message.answer(f"Начинаю рассылку для {len(users)} пользователей...")
+    success = 0
+    for (uid,) in users:
+        try:
+            if message.text:
+                await bot.send_message(uid, text_to_send, entities=message.entities)
+            elif message.photo:
+                await bot.send_photo(uid, message.photo[-1].file_id, caption=text_to_send, caption_entities=message.caption_entities)
+            success += 1
+            await asyncio.sleep(0.05)
+        except TelegramAPIError:
+            pass
+            
+    await message.answer(f"✅ Рассылка завершена.\nУспешно доставлено: {success} из {len(users)}")
+
+# 2. ВЫДАТЬ БАЛАНС
+@dp.callback_query(F.data == "adm_givemoney")
+async def start_give_money(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Введите **юзернейм** пользователя (например, @username):", parse_mode="Markdown", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.give_money_user)
+
+@dp.message(AdminStates.give_money_user)
+async def process_give_money_user(message: types.Message, state: FSMContext):
+    target_user = get_user_by_username(message.text)
+    if not target_user:
+        return await message.answer("❌ Пользователь не найден. Проверьте юзернейм или убедитесь, что он запускал бота.", reply_markup=admin_cancel_kb())
+    
+    await state.update_data(target_id=target_user[0], target_username=message.text)
+    await message.answer("Введите сумму для начисления (в рублях):", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.give_money_amount)
+
+@dp.message(AdminStates.give_money_amount)
+async def process_give_money_amount(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("❌ Введите корректное число.", reply_markup=admin_cancel_kb())
+        
+    amount = int(message.text)
+    data = await state.get_data()
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, data['target_id']))
+        conn.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ Баланс пользователя {data['target_username']} успешно пополнен на **{amount}₽**.", parse_mode="Markdown")
+    try:
+        await bot.send_message(data['target_id'], f"🎁 Администратор пополнил ваш баланс на **{amount}₽**.", parse_mode="Markdown")
+    except: pass
+
+# 3. ЗАБРАТЬ БАЛАНС
+@dp.callback_query(F.data == "adm_takemoney")
+async def start_take_money(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Введите **юзернейм** пользователя для списания средств:", parse_mode="Markdown", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.take_money_user)
+
+@dp.message(AdminStates.take_money_user)
+async def process_take_money_user(message: types.Message, state: FSMContext):
+    target_user = get_user_by_username(message.text)
+    if not target_user:
+        return await message.answer("❌ Пользователь не найден.", reply_markup=admin_cancel_kb())
+    
+    await state.update_data(target_id=target_user[0], target_username=message.text, current_balance=target_user[1])
+    await message.answer(f"Текущий баланс: **{target_user[1]}₽**\nВведите сумму для списания:", parse_mode="Markdown", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.take_money_amount)
+
+@dp.message(AdminStates.take_money_amount)
+async def process_take_money_amount(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("❌ Введите корректное число.", reply_markup=admin_cancel_kb())
+        
+    amount = int(message.text)
+    data = await state.get_data()
+    
+    new_balance = max(0, data['current_balance'] - amount)
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, data['target_id']))
+        conn.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ У пользователя {data['target_username']} списано **{amount}₽**. Новый баланс: {new_balance}₽.", parse_mode="Markdown")
+
+# 4. НАЗНАЧИТЬ АДМИНА
+@dp.callback_query(F.data == "adm_giveadmin")
+async def start_give_admin(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Введите **юзернейм** пользователя для выдачи прав администратора:", parse_mode="Markdown", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.give_admin_user)
+
+@dp.message(AdminStates.give_admin_user)
+async def process_give_admin_user(message: types.Message, state: FSMContext):
+    target_user = get_user_by_username(message.text)
+    if not target_user:
+        return await message.answer("❌ Пользователь не найден.", reply_markup=admin_cancel_kb())
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (target_user[0],))
+        conn.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ Пользователь {message.text} назначен администратором.")
+    try:
+        await bot.send_message(target_user[0], "🛡 Вам выданы права администратора. Введите /admin для доступа.")
+    except: pass
+
+# 5. ДОБАВИТЬ КЛЮЧ
+@dp.callback_query(F.data == "adm_addkey")
+async def start_create_key(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Выберите период подписки (введите цифру 1 или 3):", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.create_key_duration)
+
+@dp.message(AdminStates.create_key_duration)
+async def process_create_key_duration(message: types.Message, state: FSMContext):
+    if message.text not in ["1", "3"]:
+        return await message.answer("❌ Введите только 1 или 3.", reply_markup=admin_cancel_kb())
+    
+    await state.update_data(duration=int(message.text))
+    await message.answer("Введите сам конфигурационный ключ (vless://, trojan:// и т.д.):", reply_markup=admin_cancel_kb())
+    await state.set_state(AdminStates.create_key_data)
+
+@dp.message(AdminStates.create_key_data)
+async def process_create_key_data(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    key_text = message.text.strip()
+    
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO keys (key_data, duration) VALUES (?, ?)", (key_text, data['duration']))
+            conn.commit()
+        await message.answer(f"✅ Ключ на {data['duration']} мес. успешно загружен в базу.")
+    except sqlite3.IntegrityError:
+        await message.answer("❌ Этот ключ уже существует в базе данных.")
+    finally:
+        await state.clear()
+
+
+# --- КЛИЕНТСКАЯ ЧАСТЬ (ОСНОВНАЯ) ---
 @dp.message(Command("start"))
 async def start_handler(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
-    if not get_user(user_id):
-        ref_id = None
-        if command.args and command.args.isdigit():
-            ref_id = int(command.args)
-            if ref_id == user_id: 
-                ref_id = None
-        add_user(user_id, ref_id)
-        if ref_id:
-            try: await bot.send_message(ref_id, "🤝 По вашей реферальной ссылке зарегистрировался новый пользователь.")
-            except: pass
-
+    username = message.from_user.username
+    
+    ref_id = None
+    if command.args and command.args.isdigit():
+        ref_id = int(command.args)
+        if ref_id == user_id: 
+            ref_id = None
+            
+    update_user_info(user_id, username, ref_id)
+    
     text = (
         "💎 **Добро пожаловать в shvecarskyVPN!**\n\n"
-        "Мы предоставляем высокоскоростное премиум-подключение к интернету с полной анонимностью и без ограничений по скорости.\n\n"
-        "🌐 **Преимущества сервиса:**\n"
-        "• Высокая скорость до 1 Гбит/с\n"
-        "• Стабильный обход блокировок\n"
-        "• Поддержка всех устройств\n"
-        "• Мгновенная выдача ключа после оплаты\n\n"
-        "Выберите нужное действие из меню ниже:"
+        "Высокоскоростное премиум-подключение к интернету с полной анонимностью.\n\n"
+        "🌐 **Преимущества:**\n"
+        "• Скорость до 1 Гбит/с\n"
+        "• Обход всех блокировок\n"
+        "• Мгновенная выдача ключа\n\n"
+        "Выберите действие:"
     )
     await message.answer(text, reply_markup=main_menu_kb(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "catalog")
 async def catalog_handler(callback: types.CallbackQuery):
-    await callback.answer()
     text = (
-        "🛒 **Каталог подписок shvecarskyVPN**\n\n"
-        "Выберите подходящий период действия тарифного плана:\n\n"
-        "• **Подписка на 1 месяц** — 1₽\n"
-        "• **Подписка на 3 месяца** — 3₽\n\n"
-        "Ключ выдается моментально сразу после подтверждения!"
+        "🛒 **Каталог подписок**\n\n"
+        "Выберите тарифный план:\n\n"
+        "• **1 месяц** — 1₽\n"
+        "• **3 месяца** — 3₽\n\n"
+        "Ключ выдается моментально!"
     )
     await callback.message.edit_text(text, reply_markup=catalog_kb(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("select_tarif_"))
 async def select_tarif_handler(callback: types.CallbackQuery):
-    await callback.answer()
     tarif_id = callback.data.split("_")[2]
     tarif = TARIFS.get(tarif_id)
-    
-    if not tarif:
-        return await callback.answer("Тариф не найден.", show_alert=True)
+    if not tarif: return
         
     text = (
         f"💳 **Подтверждение покупки**\n\n"
-        f"Вы выбрали: **{tarif['name']}**\n"
-        f"Стоимость: **{tarif['price']}₽**\n\n"
-        f"С вашего баланса будет списано **{tarif['price']}₽**.\n"
-        f"Вы уверены, что хотите продолжить?"
+        f"Тариф: **{tarif['name']}**\n"
+        f"К оплате: **{tarif['price']}₽**\n\n"
+        f"С баланса будет списано **{tarif['price']}₽**."
     )
     await callback.message.edit_text(text, reply_markup=confirm_kb(tarif_id), parse_mode="Markdown")
 
@@ -177,69 +437,53 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     user = get_user(user_id)
     
-    if not tarif:
-        return await callback.answer("Ошибка тарифа.", show_alert=True)
-
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
         cur.execute("SELECT id, key_data FROM keys WHERE is_sold = 0 AND duration = ? LIMIT 1", (tarif["months"],))
         key = cur.fetchone()
         
         if not key:
-            await callback.answer(f"⚠️ Ключи на {tarif['name']} временно закончились. Скоро пополним!", show_alert=True)
-            return
+            return await callback.answer("⚠️ Ключи временно закончились. Скоро пополним!", show_alert=True)
             
         if user[0] < tarif["price"]:
-            await callback.answer(f"❌ Недостаточно средств на балансе. Пополните баланс в профиле!", show_alert=True)
-            return
+            return await callback.answer("❌ Недостаточно средств. Пополните баланс!", show_alert=True)
         
         cur.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (tarif["price"], user_id))
         cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
         
-        if user[1]:
+        if user[1]: # Если есть реферал
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REF_BONUS, user[1]))
-            try: await bot.send_message(user[1], f"🎉 Ваш реферал купил VPN! Вам начислено {REF_BONUS}₽.")
+            try: await bot.send_message(user[1], f"🎉 Реферал купил VPN! Начислено {REF_BONUS}₽.")
             except: pass
-            
         conn.commit()
     
-    await callback.answer()
     text = (
         f"✅ **Оплата прошла успешно!**\n\n"
-        f"Ваш персональный ключ ({tarif['name']}):\n\n"
+        f"Ваш ключ ({tarif['name']}):\n"
         f"`{key[1]}`\n\n"
-        f"*(Нажмите на ключ, чтобы скопировать в буфер обмена)*\n\n"
         f"{HAPP_INSTRUCTION}"
     )
     await callback.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
 
-# --- ПОПОЛНЕНИЕ ЗВЕЗДАМИ (TELEGRAM STARS) ---
 @dp.callback_query(F.data == "topup_menu")
 async def topup_menu_handler(callback: types.CallbackQuery):
-    await callback.answer()
-    text = (
-        "⭐️ **Пополнение баланса (Telegram Stars)**\n\n"
-        "Выберите количество звезд для покупки. Каждая 1 ⭐️ зачисляет 1₽ на ваш баланс:"
-    )
+    text = "⭐️ **Пополнение баланса**\n\n1 ⭐️ Telegram Stars = 1₽."
     await callback.message.edit_text(text, reply_markup=topup_amounts_kb(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("paystars_"))
 async def pay_stars_handler(callback: types.CallbackQuery):
-    await callback.answer()
-    stars_amount = int(callback.data.split("_")[1])
-    
-    prices = [LabeledPrice(label="Звёзды shvecarskyVPN", amount=stars_amount)]
-    
+    amount = int(callback.data.split("_")[1])
     await bot.send_invoice(
         chat_id=callback.from_user.id,
-        title="Пополнение баланса Звёздами",
-        description=f"Пополнение баланса бота на {stars_amount}₽ за {stars_amount} Telegram Stars",
-        provider_token="", # Для Telegram Stars provider_token остается ПУСТЫМ!
+        title="Пополнение баланса",
+        description=f"Пополнение на {amount}₽",
+        provider_token="", 
         currency="XTR",
-        prices=prices,
-        start_parameter="topup-stars",
-        payload=f"stars_{stars_amount}"
+        prices=[LabeledPrice(label="Звёзды", amount=amount)],
+        start_parameter="topup",
+        payload=f"stars_{amount}"
     )
+    await callback.answer()
 
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
@@ -248,112 +492,48 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
     amount = message.successful_payment.total_amount
-    user_id = message.from_user.id
-    
     with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+        conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, message.from_user.id))
         conn.commit()
-        
-    await message.answer(
-        f"🎉 **Оплата заездами прошла успешно!**\n\n"
-        f"Ваш баланс пополнен на **{amount}₽**.\n"
-        f"Теперь вы можете приобрести подписку в каталоге.",
-        reply_markup=main_menu_kb(),
-        parse_mode="Markdown"
-    )
+    await message.answer(f"🎉 **Баланс пополнен на {amount}₽!**", reply_markup=main_menu_kb(), parse_mode="Markdown")
 
-# --- ЛИЧНЫЙ КАБИНЕТ С ИСПРАВЛЕНИЕМ ЗАВИСАНИЯ ---
 @dp.message(Command("profile"))
 @dp.callback_query(F.data == "profile")
 async def profile_handler(event: types.Message | types.CallbackQuery):
     user_id = event.from_user.id
     user = get_user(user_id)
-    
-    if not user:
-        add_user(user_id)
-        user = (0, None)
-        
     bot_info = await bot.me()
-    ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
     text = (
         f"👤 **Личный кабинет**\n\n"
-        f"🆔 Ваш Telegram ID: `{user_id}`\n"
-        f"💰 Ваш баланс: **{user[0]}₽**\n\n"
-        f"🤝 **Партнерская система:**\n"
-        f"Приглашайте друзей и получайте бонусом **{REF_BONUS}₽** на свой баланс за каждую их покупку!\n\n"
-        f"Ваша ссылка:\n`{ref_link}`"
+        f"🆔 ID: `{user_id}`\n"
+        f"💰 Баланс: **{user[0]}₽**\n\n"
+        f"🤝 **Партнерская программа:**\n"
+        f"Бонус за покупку друга: **{REF_BONUS}₽**\n\n"
+        f"Ваша ссылка:\n`https://t.me/{bot_info.username}?start={user_id}`"
     )
     
     if isinstance(event, types.CallbackQuery):
-        await event.answer()
-        try:
-            await event.message.edit_text(text, reply_markup=profile_kb(), parse_mode="Markdown")
-        except Exception:
-            await event.message.answer(text, reply_markup=profile_kb(), parse_mode="Markdown")
+        await event.message.edit_text(text, reply_markup=profile_kb(), parse_mode="Markdown")
     else:
         await event.answer(text, reply_markup=profile_kb(), parse_mode="Markdown")
 
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help")
 async def help_handler(event: types.Message | types.CallbackQuery):
-    text = f"{HAPP_INSTRUCTION}"
     if isinstance(event, types.CallbackQuery):
-        await event.answer()
-        await event.message.edit_text(text, reply_markup=back_kb(), parse_mode="Markdown")
+        await event.message.edit_text(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="Markdown")
     else:
-        await event.answer(text, reply_markup=back_kb(), parse_mode="Markdown")
+        await event.answer(HAPP_INSTRUCTION, reply_markup=back_kb(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery):
-    await callback.answer()
     text = (
         "💎 **Добро пожаловать в shvecarskyVPN!**\n\n"
-        "Мы предоставляем высокоскоростное премиум-подключение к интернету с полной анонимностью и без ограничений по скорости.\n\n"
-        "🌐 **Преимущества сервиса:**\n"
-        "• Высокая скорость до 1 Гбит/с\n"
-        "• Стабильный обход блокировок\n"
-        "• Поддержка всех устройств\n"
-        "• Мгновенная выдача ключа после оплаты\n\n"
-        "Выберите нужное действие из меню ниже:"
+        "Высокоскоростное премиум-подключение к интернету.\n\n"
+        "Выберите действие:"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="Markdown")
-
-# --- АДМИН ПАНЕЛЬ ---
-@dp.message(Command("addkey"), F.from_user.id == ADMIN_ID)
-async def admin_add_key(message: types.Message, command: CommandObject):
-    if not command.args:
-        return await message.answer("⚠️ Формат: `/addkey [месяцы] [ключ]`", parse_mode="Markdown")
-    try:
-        args = command.args.split(maxsplit=1)
-        duration = int(args[0])
-        key_data = args[1].strip()
-        with sqlite3.connect(DB_FILE) as conn:
-            cur = conn.cursor()
-            cur.execute("INSERT INTO keys (key_data, duration) VALUES (?, ?)", (key_data, duration))
-            conn.commit()
-        await message.answer(f"✅ Ключ на **{duration} мес.** успешно добавлен!", parse_mode="Markdown")
-    except sqlite3.IntegrityError:
-        await message.answer("❌ Этот ключ уже есть в базе.")
-    except Exception:
-        await message.answer("❌ Ошибка формата.", parse_mode="Markdown")
-
-@dp.message(Command("givemoney"), F.from_user.id == ADMIN_ID)
-async def admin_give_money(message: types.Message, command: CommandObject):
-    if not command.args:
-        return await message.answer("⚠️ Формат: `/givemoney [ID] [Сумма]`", parse_mode="Markdown")
-    try:
-        args = command.args.split()
-        target_id = int(args[0])
-        amount = int(args[1])
-        with sqlite3.connect(DB_FILE) as conn:
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_id))
-            conn.commit()
-        await message.answer(f"✅ Выдано **{amount}₽** пользователю `{target_id}`.", parse_mode="Markdown")
-    except Exception:
-        await message.answer("❌ Ошибка формата.", parse_mode="Markdown")
 
 # --- WEB СЕРВЕР RENDER ---
 async def handle_ping(request):
@@ -366,7 +546,7 @@ async def self_ping():
     async with ClientSession() as session:
         while True:
             try:
-                async with session.get(render_url) as resp: pass
+                async with session.get(render_url): pass
             except: pass
             await asyncio.sleep(600)
 
@@ -385,7 +565,7 @@ async def main():
     await site.start()
 
     asyncio.create_task(self_ping())
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, handle_as_tasks=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
