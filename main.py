@@ -151,7 +151,11 @@ def main_menu_kb():
         ],
         [
             InlineKeyboardButton(text="📖 Инструкция", callback_data="help"),
-            InlineKeyboardButton(text="📜 Правила", callback_data="rules")
+            InlineKeyboardButton(
+                text="📜 Правила", 
+                callback_data="rules", 
+                icon_custom_emoji_id="5235562737232291360"
+            )
         ],
         [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/IRFIX_Factor")]
     ])
