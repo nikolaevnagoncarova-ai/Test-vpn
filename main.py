@@ -3,7 +3,7 @@ import asyncio
 import logging
 import sqlite3
 from aiohttp import web, ClientSession
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 from aiogram.fsm.context import FSMContext
@@ -11,7 +11,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Секретный код для первого получения админки. Можно задать в переменных окружения Render
 SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "SHVECARSKY-ADMIN-777")
 DB_FILE = "vpn_shop.db"
 
@@ -39,7 +38,6 @@ class AdminStates(StatesGroup):
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        # Таблица пользователей
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -49,7 +47,6 @@ def init_db():
                 is_admin INTEGER DEFAULT 0
             )
         """)
-        # Таблица ключей
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +55,6 @@ def init_db():
                 is_sold INTEGER DEFAULT 0
             )
         """)
-        # Таблица системных настроек (для одноразового кода)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 key TEXT PRIMARY KEY,
@@ -71,7 +67,6 @@ def init_db():
 def update_user_info(user_id: int, username: str, referrer_id: int = None):
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        # Проверяем существование
         cur.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
         if not cur.fetchone():
             cur.execute("INSERT INTO users (user_id, username, referrer_id) VALUES (?, ?, ?)", (user_id, username, referrer_id))
@@ -86,11 +81,24 @@ def get_user(user_id: int):
         return cur.fetchone()
 
 def get_user_by_username(username: str):
+    if not username:
+        return None
     clean_username = username.replace("@", "").strip()
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
         cur.execute("SELECT user_id, balance, is_admin FROM users WHERE LOWER(username) = LOWER(?)", (clean_username,))
         return cur.fetchone()
+
+# --- ПЕРЕХВАТЧИК (MIDDLEWARE) ДЛЯ ОБНОВЛЕНИЯ ДАННЫХ ---
+class UserUpdateMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        if user:
+            update_user_info(user.id, user.username)
+        return await handler(event, data)
+
+dp.message.middleware(UserUpdateMiddleware())
+dp.callback_query.middleware(UserUpdateMiddleware())
 
 # --- МЕНЮ КОМАНД ---
 async def set_bot_commands(bot: Bot):
@@ -165,13 +173,6 @@ HAPP_INSTRUCTION = (
     "4. Выберите **«Импорт из буфера обмена»** (Import from Clipboard).\n"
     "5. Переключите тумблер для запуска."
 )
-
-# --- ПЕРЕХВАТЧИК (АВТО-ОБНОВЛЕНИЕ ДАННЫХ) ---
-@dp.message()
-async def auto_update_user_middleware(message: types.Message, handler=None):
-    if message.from_user:
-        update_user_info(message.from_user.id, message.from_user.username)
-    return await handler(message) if handler else None
 
 # --- АВТОРИЗАЦИЯ АДМИНА ---
 @dp.message(Command("claimadmin"))
@@ -314,7 +315,6 @@ async def process_take_money_amount(message: types.Message, state: FSMContext):
         
     amount = int(message.text)
     data = await state.get_data()
-    
     new_balance = max(0, data['current_balance'] - amount)
     
     with sqlite3.connect(DB_FILE) as conn:
@@ -379,7 +379,6 @@ async def process_create_key_data(message: types.Message, state: FSMContext):
     finally:
         await state.clear()
 
-
 # --- КЛИЕНТСКАЯ ЧАСТЬ (ОСНОВНАЯ) ---
 @dp.message(Command("start"))
 async def start_handler(message: types.Message, command: CommandObject):
@@ -392,6 +391,7 @@ async def start_handler(message: types.Message, command: CommandObject):
         if ref_id == user_id: 
             ref_id = None
             
+    # Записываем реферала, если это первый вход
     update_user_info(user_id, username, ref_id)
     
     text = (
@@ -451,7 +451,7 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         cur.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (tarif["price"], user_id))
         cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
         
-        if user[1]: # Если есть реферал
+        if user[1]:
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REF_BONUS, user[1]))
             try: await bot.send_message(user[1], f"🎉 Реферал купил VPN! Начислено {REF_BONUS}₽.")
             except: pass
@@ -530,7 +530,11 @@ async def help_handler(event: types.Message | types.CallbackQuery):
 async def back_main(callback: types.CallbackQuery):
     text = (
         "💎 **Добро пожаловать в shvecarskyVPN!**\n\n"
-        "Высокоскоростное премиум-подключение к интернету.\n\n"
+        "Высокоскоростное премиум-подключение к интернету с полной анонимностью.\n\n"
+        "🌐 **Преимущества:**\n"
+        "• Скорость до 1 Гбит/с\n"
+        "• Обход всех блокировок\n"
+        "• Мгновенная выдача ключа\n\n"
         "Выберите действие:"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="Markdown")
@@ -553,6 +557,9 @@ async def self_ping():
 async def main():
     logging.basicConfig(level=logging.INFO)
     init_db()
+    
+    # Сбрасываем накопившиеся за время простоя апдейты, чтобы бот не спамил
+    await bot.delete_webhook(drop_pending_updates=True)
     await set_bot_commands(bot)
     
     app = web.Application()
