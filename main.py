@@ -14,7 +14,7 @@ from aiogram.exceptions import TelegramAPIError
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SECRET_ADMIN_CODE = os.getenv("ADMIN_SECRET", "GOROSHEK-ADMIN-777")
 
-# Данные для Platega (лучше вынести в Environment Variables на Render)
+# Данные для Platega
 PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
 PLATEGA_SECRET_KEY = os.getenv("PLATEGA_SECRET_KEY", "YOUR_SECRET_KEY")
 PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io")
@@ -849,13 +849,14 @@ async def main():
     init_db()
     
     await bot.delete_webhook(drop_pending_updates=True)
-    await set_my_commands(bot)
+    await set_bot_commands(bot)
     
     asyncio.create_task(self_ping())
     
+    # Исправлено: запуск веб-сервера и пуллинга без нераскрытых сессий и падений
     await asyncio.gather(
         start_web_server(),
-        dp.start_polling(bot, hold_as_tasks=True) # type: ignore
+        dp.start_polling(bot, handle_as_tasks=True)
     )
 
 if __name__ == "__main__":
