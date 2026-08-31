@@ -57,7 +57,8 @@ def init_db():
                 referrer_id INTEGER,
                 is_admin INTEGER DEFAULT 0,
                 sub_expires TEXT DEFAULT NULL,
-                key_data TEXT DEFAULT NULL
+                key_data TEXT DEFAULT NULL,
+                has_used_trial INTEGER DEFAULT 0
             )
         """)
         cursor.execute("PRAGMA table_info(users)")
@@ -66,6 +67,8 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN sub_expires TEXT DEFAULT NULL")
         if "key_data" not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN key_data TEXT DEFAULT NULL")
+        if "has_used_trial" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN has_used_trial INTEGER DEFAULT 0")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS keys (
@@ -97,7 +100,7 @@ def update_user_info(user_id: int, username: str, referrer_id: int = None):
 def get_user(user_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT balance, referrer_id, is_admin, sub_expires, key_data FROM users WHERE user_id = ?", (user_id,))
+        cur.execute("SELECT balance, referrer_id, is_admin, sub_expires, key_data, has_used_trial FROM users WHERE user_id = ?", (user_id,))
         return cur.fetchone()
 
 def get_referrals_count(user_id: int):
@@ -133,114 +136,152 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- КЛАВИАТУРЫ ---
+# --- КЛАВИАТУРЫ С ЗЕЛЕНЫМИ КНОПКАМИ И ПРЕМИУМ ЭМОДЗИ ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="Купить подписку", 
                 callback_data="catalog", 
-                icon_custom_emoji_id="5233576400757239803",
+                icon_custom_emoji_id="5235685594771790154",
                 style="success"
             )
         ],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
         [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
-            InlineKeyboardButton(text="👥 Рефералы", callback_data="referral_menu")
+            InlineKeyboardButton(
+                text="Пробный период (3 дня)", 
+                callback_data="free_trial", 
+                icon_custom_emoji_id="5235526088276353071",
+                style="success"
+            )
         ],
         [
-            InlineKeyboardButton(text="📖 Инструкция", callback_data="help"),
+            InlineKeyboardButton(
+                text="Пополнить баланс", 
+                callback_data="topup_menu",
+                icon_custom_emoji_id="5235685594771790154",
+                style="success"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Профиль", 
+                callback_data="profile",
+                icon_custom_emoji_id="5235526088276353071",
+                style="success"
+            ),
+            InlineKeyboardButton(
+                text="Рефералы", 
+                callback_data="referral_menu",
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Инструкция", 
+                callback_data="help",
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
+            ),
             InlineKeyboardButton(
                 text="Правила", 
                 callback_data="rules", 
-                icon_custom_emoji_id="5235562737232291360"
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
             )
         ],
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/IRFIX_Factor")]
+        [
+            InlineKeyboardButton(
+                text="Поддержка", 
+                url="https://t.me/IRFIX_Factor",
+                icon_custom_emoji_id="5238192193520314051",
+                style="success"
+            )
+        ]
     ])
 
 def catalog_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌱 1 месяц — 119 ₽", callback_data="select_tarif_1")],
-        [InlineKeyboardButton(text="🌿 3 месяца — 309 ₽", callback_data="select_tarif_3")],
-        [InlineKeyboardButton(text="🍀 6 месяцев — 589 ₽ | Выгодно 🔥", callback_data="select_tarif_6")],
-        [InlineKeyboardButton(text="🌳 12 месяцев — 979 ₽ | Супер-выгодно 🔥", callback_data="select_tarif_12")],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="1 месяц — 119 ₽", callback_data="select_tarif_1", style="success")],
+        [InlineKeyboardButton(text="3 месяца — 309 ₽", callback_data="select_tarif_3", style="success")],
+        [InlineKeyboardButton(text="6 месяцев — 589 ₽", callback_data="select_tarif_6", style="success")],
+        [InlineKeyboardButton(text="12 месяцев — 979 ₽", callback_data="select_tarif_12", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def confirm_kb(tarif_id: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить покупку", callback_data=f"buy_confirm_{tarif_id}")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="catalog")]
+        [InlineKeyboardButton(text="Подтвердить покупку", callback_data=f"buy_confirm_{tarif_id}", style="success")],
+        [InlineKeyboardButton(text="Отмена", callback_data="catalog", style="success")]
     ])
 
 def profile_kb(has_sub: bool):
     kb = []
     if has_sub:
-        kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
-    kb.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
+        kb.append([InlineKeyboardButton(text="Мой ключ доступа", callback_data="show_my_key", style="success")])
+    kb.append([InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def rules_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")],
-        [InlineKeyboardButton(text="🔐 Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39", style="success")],
+        [InlineKeyboardButton(text="Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def referral_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def topup_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Пополнить через Platega (Рубли)", callback_data="topup_platega_menu")],
-        [InlineKeyboardButton(text="⭐️ Пополнить через Telegram Stars", callback_data="topup_stars_menu")],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Пополнить через Platega (Рубли)", callback_data="topup_platega_menu", style="success")],
+        [InlineKeyboardButton(text="Пополнить через Telegram Stars", callback_data="topup_stars_menu", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def topup_platega_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="119 ₽", callback_data="platega_pay_119"), InlineKeyboardButton(text="309 ₽", callback_data="platega_pay_309")],
-        [InlineKeyboardButton(text="589 ₽", callback_data="platega_pay_589"), InlineKeyboardButton(text="979 ₽", callback_data="platega_pay_979")],
-        [InlineKeyboardButton(text="✍️ Ввести свою сумму", callback_data="platega_custom_amount")],
-        [InlineKeyboardButton(text="◀️ Назад к выбору метода", callback_data="topup_menu")]
+        [InlineKeyboardButton(text="119 ₽", callback_data="platega_pay_119", style="success"), InlineKeyboardButton(text="309 ₽", callback_data="platega_pay_309", style="success")],
+        [InlineKeyboardButton(text="589 ₽", callback_data="platega_pay_589", style="success"), InlineKeyboardButton(text="979 ₽", callback_data="platega_pay_979", style="success")],
+        [InlineKeyboardButton(text="Ввести свою сумму", callback_data="platega_custom_amount", style="success")],
+        [InlineKeyboardButton(text="Назад к выбору метода", callback_data="topup_menu", style="success")]
     ])
 
 def topup_stars_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="119 ⭐️", callback_data="paystars_119"), InlineKeyboardButton(text="309 ⭐️", callback_data="paystars_309")],
-        [InlineKeyboardButton(text="589 ⭐️", callback_data="paystars_589"), InlineKeyboardButton(text="979 ⭐️", callback_data="paystars_979")],
-        [InlineKeyboardButton(text="◀️ Назад к выбору метода", callback_data="topup_menu")]
+        [InlineKeyboardButton(text="119 Stars", callback_data="paystars_119", style="success"), InlineKeyboardButton(text="309 Stars", callback_data="paystars_309", style="success")],
+        [InlineKeyboardButton(text="589 Stars", callback_data="paystars_589", style="success"), InlineKeyboardButton(text="979 Stars", callback_data="paystars_979", style="success")],
+        [InlineKeyboardButton(text="Назад к выбору метода", callback_data="topup_menu", style="success")]
     ])
 
 def back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def cancel_topup_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="topup_platega_menu")]
+        [InlineKeyboardButton(text="Отмена", callback_data="topup_platega_menu", style="success")]
     ])
 
 def admin_panel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✉️ Рассылка", callback_data="adm_broadcast"), InlineKeyboardButton(text="🔑 Добавить ключ", callback_data="adm_addkey")],
-        [InlineKeyboardButton(text="💰 Выдать баланс", callback_data="adm_givemoney"), InlineKeyboardButton(text="📉 Забрать баланс", callback_data="adm_takemoney")],
-        [InlineKeyboardButton(text="🛡 Дать админа", callback_data="adm_giveadmin")],
-        [InlineKeyboardButton(text="❌ Закрыть", callback_data="back_main")]
+        [InlineKeyboardButton(text="Рассылка", callback_data="adm_broadcast", style="success"), InlineKeyboardButton(text="Добавить ключ", callback_data="adm_addkey", style="success")],
+        [InlineKeyboardButton(text="Выдать баланс", callback_data="adm_givemoney", style="success"), InlineKeyboardButton(text="Забрать баланс", callback_data="adm_takemoney", style="success")],
+        [InlineKeyboardButton(text="Дать админа", callback_data="adm_giveadmin", style="success")],
+        [InlineKeyboardButton(text="Закрыть", callback_data="back_main", style="success")]
     ])
 
 def admin_cancel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="adm_cancel")]
+        [InlineKeyboardButton(text="Отмена", callback_data="adm_cancel", style="success")]
     ])
 
 HAPP_INSTRUCTION = (
-    "🌿 <b>Инструкция по подключению Горошек VPN:</b>\n\n"
+    "<b>Инструкция по подключению Горошек VPN:</b>\n\n"
     "1. Скопируйте ваш уникальный ключ доступа из сообщения выше.\n"
     "2. Скачайте официальное приложение <b>Happ</b> (доступно в App Store и Google Play).\n"
     "3. Откройте приложение и нажмите на значок <b>«+»</b> в правом верхнем углу.\n"
@@ -328,9 +369,9 @@ async def admin_panel_handler(message: types.Message, state: FSMContext):
         keys_count = cur.fetchone()[0]
 
     text = (
-        "🌿 <b>Панель управления Горошек VPN</b>\n\n"
-        f"👥 Всего пользователей: <b>{users_count}</b>\n"
-        f"🔑 Свободных ключей: <b>{keys_count}</b>\n\n"
+        "<b>Панель управления Горошек VPN</b>\n\n"
+        f"Всего пользователей: <b>{users_count}</b>\n"
+        f"Свободных ключей: <b>{keys_count}</b>\n\n"
         "Выберите необходимое действие:"
     )
     await message.answer(text, reply_markup=admin_panel_kb(), parse_mode="HTML")
@@ -350,16 +391,16 @@ async def admin_cancel_handler(callback: types.CallbackQuery, state: FSMContext)
         keys_count = cur.fetchone()[0]
 
     text = (
-        "🌿 <b>Панель управления Горошек VPN</b>\n\n"
-        f"👥 Всего пользователей: <b>{users_count}</b>\n"
-        f"🔑 Свободных ключей: <b>{keys_count}</b>\n\n"
+        "<b>Панель управления Горошек VPN</b>\n\n"
+        f"Всего пользователей: <b>{users_count}</b>\n"
+        f"Свободных ключей: <b>{keys_count}</b>\n\n"
         "Выберите необходимое действие:"
     )
     await go_to_text_menu(callback, text, admin_panel_kb())
 
 @dp.callback_query(F.data == "adm_broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    await go_to_text_menu(callback, "🌿 <b>Рассылка</b>\n\nВведите текст или прикрепите медиа для отправки пользователям:", admin_cancel_kb())
+    await go_to_text_menu(callback, "<b>Рассылка</b>\n\nВведите текст или прикрепите медиа для отправки пользователям:", admin_cancel_kb())
     await state.set_state(AdminStates.broadcast_text)
 
 @dp.message(AdminStates.broadcast_text)
@@ -372,7 +413,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         cur.execute("SELECT user_id FROM users")
         users = cur.fetchall()
 
-    status_msg = await message.answer(f"🌱 Рассылка запущена для {len(users)} пользователей...")
+    status_msg = await message.answer(f"Рассылка запущена для {len(users)} пользователей...")
     success = 0
     for (uid,) in users:
         try:
@@ -385,21 +426,21 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         except TelegramAPIError:
             pass
             
-    await status_msg.edit_text(f"✅ <b>Рассылка завершена.</b>\n\nУспешно доставлено: <b>{success}</b> из <b>{len(users)}</b>", parse_mode="HTML")
+    await status_msg.edit_text(f"<b>Рассылка завершена.</b>\n\nУспешно доставлено: <b>{success}</b> из <b>{len(users)}</b>", parse_mode="HTML")
 
 @dp.callback_query(F.data == "adm_givemoney")
 async def start_give_money(callback: types.CallbackQuery, state: FSMContext):
-    await go_to_text_menu(callback, "🌿 <b>Выдача баланса</b>\n\nВведите юзернейм пользователя (например, @username):", admin_cancel_kb())
+    await go_to_text_menu(callback, "<b>Выдача баланса</b>\n\nВведите юзернейм пользователя (например, @username):", admin_cancel_kb())
     await state.set_state(AdminStates.give_money_user)
 
 @dp.message(AdminStates.give_money_user)
 async def process_give_money_user(message: types.Message, state: FSMContext):
     target_user = get_user_by_username(message.text)
     if not target_user:
-        return await message.answer("❌ Пользователь не найден. Попробуйте еще раз:", reply_markup=admin_cancel_kb())
+        return await message.answer("Пользователь не найден. Попробуйте еще раз:", reply_markup=admin_cancel_kb())
     
     await state.update_data(target_id=target_user[0], target_username=message.text)
-    await message.answer("🌿 <b>Выдача баланса</b>\n\nВведите сумму для начисления (в рублях):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await message.answer("<b>Выдача баланса</b>\n\nВведите сумму для начисления (в рублях):", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.give_money_amount)
 
 @dp.message(AdminStates.give_money_amount)
@@ -407,7 +448,7 @@ async def process_give_money_amount(message: types.Message, state: FSMContext):
     try:
         amount = float(message.text)
     except ValueError:
-        return await message.answer("❌ Введите корректное число:", reply_markup=admin_cancel_kb())
+        return await message.answer("Введите корректное число:", reply_markup=admin_cancel_kb())
         
     data = await state.get_data()
     with sqlite3.connect(DB_FILE) as conn:
@@ -416,24 +457,24 @@ async def process_give_money_amount(message: types.Message, state: FSMContext):
         conn.commit()
         
     await state.clear()
-    await message.answer(f"✅ Баланс пользователя <b>{data['target_username']}</b> успешно пополнен на <b>{amount:.2f} ₽</b>.", parse_mode="HTML")
+    await message.answer(f"Баланс пользователя <b>{data['target_username']}</b> успешно пополнен на <b>{amount:.2f} ₽</b>.", parse_mode="HTML")
     try:
-        await bot.send_message(data['target_id'], f"🌿 Ваш баланс был пополнен администратором на <b>{amount:.2f} ₽</b>.", parse_mode="HTML")
+        await bot.send_message(data['target_id'], f"Ваш баланс был пополнен администратором на <b>{amount:.2f} ₽</b>.", parse_mode="HTML")
     except: pass
 
 @dp.callback_query(F.data == "adm_takemoney")
 async def start_take_money(callback: types.CallbackQuery, state: FSMContext):
-    await go_to_text_menu(callback, "🌿 <b>Списание баланса</b>\n\nВведите юзернейм пользователя:", admin_cancel_kb())
+    await go_to_text_menu(callback, "<b>Списание баланса</b>\n\nВведите юзернейм пользователя:", admin_cancel_kb())
     await state.set_state(AdminStates.take_money_user)
 
 @dp.message(AdminStates.take_money_user)
 async def process_take_money_user(message: types.Message, state: FSMContext):
     target_user = get_user_by_username(message.text)
     if not target_user:
-        return await message.answer("❌ Пользователь не найден:", reply_markup=admin_cancel_kb())
+        return await message.answer("Пользователь не найден:", reply_markup=admin_cancel_kb())
     
     await state.update_data(target_id=target_user[0], target_username=message.text, current_balance=target_user[1])
-    await message.answer(f"🌿 Текущий баланс: <b>{target_user[1]:.2f} ₽</b>.\n\nВведите сумму списания:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await message.answer(f"Текущий баланс: <b>{target_user[1]:.2f} ₽</b>.\n\nВведите сумму списания:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.take_money_amount)
 
 @dp.message(AdminStates.take_money_amount)
@@ -441,7 +482,7 @@ async def process_take_money_amount(message: types.Message, state: FSMContext):
     try:
         amount = float(message.text)
     except ValueError:
-        return await message.answer("❌ Введите число:", reply_markup=admin_cancel_kb())
+        return await message.answer("Введите число:", reply_markup=admin_cancel_kb())
         
     data = await state.get_data()
     new_balance = max(0.0, data['current_balance'] - amount)
@@ -452,18 +493,18 @@ async def process_take_money_amount(message: types.Message, state: FSMContext):
         conn.commit()
         
     await state.clear()
-    await message.answer(f"✅ Списано <b>{amount:.2f} ₽</b> у <b>{data['target_username']}</b>.\nНовый баланс: <b>{new_balance:.2f} ₽</b>.", parse_mode="HTML")
+    await message.answer(f"Списано <b>{amount:.2f} ₽</b> у <b>{data['target_username']}</b>.\nНовый баланс: <b>{new_balance:.2f} ₽</b>.", parse_mode="HTML")
 
 @dp.callback_query(F.data == "adm_giveadmin")
 async def start_give_admin(callback: types.CallbackQuery, state: FSMContext):
-    await go_to_text_menu(callback, "🌿 <b>Выдача прав администратора</b>\n\nВведите юзернейм:", admin_cancel_kb())
+    await go_to_text_menu(callback, "<b>Выдача прав администратора</b>\n\nВведите юзернейм:", admin_cancel_kb())
     await state.set_state(AdminStates.give_admin_user)
 
 @dp.message(AdminStates.give_admin_user)
 async def process_give_admin_user(message: types.Message, state: FSMContext):
     target_user = get_user_by_username(message.text)
     if not target_user:
-        return await message.answer("❌ Пользователь не найден:", reply_markup=admin_cancel_kb())
+        return await message.answer("Пользователь не найден:", reply_markup=admin_cancel_kb())
     
     with sqlite3.connect(DB_FILE) as conn:
         cur = conn.cursor()
@@ -471,23 +512,23 @@ async def process_give_admin_user(message: types.Message, state: FSMContext):
         conn.commit()
         
     await state.clear()
-    await message.answer(f"✅ Пользователь <b>{message.text}</b> назначен администратором.", parse_mode="HTML")
+    await message.answer(f"Пользователь <b>{message.text}</b> назначен администратором.", parse_mode="HTML")
     try:
-        await bot.send_message(target_user[0], "🛡 Вам были назначены права администратора. Введите /admin")
+        await bot.send_message(target_user[0], "Вам были назначены права администратора. Введите /admin")
     except: pass
 
 @dp.callback_query(F.data == "adm_addkey")
 async def start_create_key(callback: types.CallbackQuery, state: FSMContext):
-    await go_to_text_menu(callback, "🌿 <b>Добавление ключа</b>\n\nВведите срок подписки в месяцах (1, 3, 6 или 12):", admin_cancel_kb())
+    await go_to_text_menu(callback, "<b>Добавление ключа</b>\n\nВведите срок подписки в месяцах (1, 3, 6 или 12):", admin_cancel_kb())
     await state.set_state(AdminStates.create_key_duration)
 
 @dp.message(AdminStates.create_key_duration)
 async def process_create_key_duration(message: types.Message, state: FSMContext):
     if message.text not in ["1", "3", "6", "12"]:
-        return await message.answer("❌ Доступные варианты срока: 1, 3, 6, 12.", reply_markup=admin_cancel_kb())
+        return await message.answer("Доступные варианты срока: 1, 3, 6, 12.", reply_markup=admin_cancel_kb())
     
     await state.update_data(duration=int(message.text))
-    await message.answer("🌿 Отправьте текст конфигурационного ключа:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
+    await message.answer("Отправьте текст конфигурационного ключа:", reply_markup=admin_cancel_kb(), parse_mode="HTML")
     await state.set_state(AdminStates.create_key_data)
 
 @dp.message(AdminStates.create_key_data)
@@ -500,9 +541,9 @@ async def process_create_key_data(message: types.Message, state: FSMContext):
             cur = conn.cursor()
             cur.execute("INSERT INTO keys (key_data, duration) VALUES (?, ?)", (key_text, data['duration']))
             conn.commit()
-        await message.answer(f"✅ Ключ на <b>{data['duration']} мес.</b> успешно добавлен в базу.", parse_mode="HTML")
+        await message.answer(f"Ключ на <b>{data['duration']} мес.</b> успешно добавлен в базу.", parse_mode="HTML")
     except sqlite3.IntegrityError:
-        await message.answer("❌ Такой ключ уже существует в базе данных.")
+        await message.answer("Такой ключ уже существует в базе данных.")
     finally:
         await state.clear()
 
@@ -521,17 +562,61 @@ async def start_handler(message: types.Message, command: CommandObject, state: F
     update_user_info(user_id, username, ref_id)
     
     text = (
-        "🌱 <b>Добро пожаловать в Горошек VPN</b>\n\n"
+        "<b>Добро пожаловать в Горошек VPN</b>\n\n"
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
     await message.answer_photo(photo=MENU_PHOTO, caption=text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
+@dp.callback_query(F.data == "free_trial")
+async def free_trial_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    user = get_user(user_id)
+    has_used_trial = user[5] if user else 0
+
+    if has_used_trial == 1:
+        return await callback.answer("Вы уже активировали пробный период ранее!", show_alert=True)
+
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, key_data FROM keys WHERE is_sold = 0 LIMIT 1")
+        key = cur.fetchone()
+
+        if not key:
+            return await callback.answer("Ключи временно закончились. Попробуйте позже!", show_alert=True)
+
+        now = datetime.now()
+        current_sub_expires = user[3]
+        if current_sub_expires:
+            try:
+                exp_date = datetime.fromisoformat(current_sub_expires)
+                base_date = exp_date if exp_date > now else now
+            except:
+                base_date = now
+        else:
+            base_date = now
+
+        new_expires = base_date + timedelta(days=3)
+        new_expires_str = new_expires.isoformat()
+
+        cur.execute("UPDATE users SET sub_expires = ?, key_data = ?, has_used_trial = 1 WHERE user_id = ?",
+                    (new_expires_str, key[1], user_id))
+        cur.execute("UPDATE keys SET is_sold = 1 WHERE id = ?", (key[0],))
+        conn.commit()
+
+    text = (
+        "<b>Пробный период успешно активирован на 3 дня!</b>\n\n"
+        f"Ваш ключ доступа:\n"
+        f"<code>{key[1]}</code>\n\n"
+        f"{HAPP_INSTRUCTION}"
+    )
+    await go_to_text_menu(callback, text, back_kb())
+
 @dp.callback_query(F.data == "catalog")
 async def catalog_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = (
-        "🌿 <b>Тарифы Горошек VPN</b>\n\n"
+        "<b>Тарифы Горошек VPN</b>\n\n"
         "Выберите подходящий вариант подписки. Доступ к VPN выдается моментально сразу после подтверждения оплаты.\n"
     )
     await go_to_text_menu(callback, text, catalog_kb())
@@ -543,9 +628,9 @@ async def select_tarif_handler(callback: types.CallbackQuery):
     if not tarif: return
         
     text = (
-        f"🌿 <b>Подтверждение заказа</b>\n\n"
-        f"📦 Тариф: <b>{tarif['name']}</b>\n"
-        f"💰 Стоимость: <b>{tarif['price']:.2f} ₽</b>\n\n"
+        f"<b>Подтверждение заказа</b>\n\n"
+        f"Тариф: <b>{tarif['name']}</b>\n"
+        f"Стоимость: <b>{tarif['price']:.2f} ₽</b>\n\n"
         f"Сумма будет списана с вашего внутреннего баланса в боте."
     )
     await go_to_text_menu(callback, text, confirm_kb(tarif_id))
@@ -563,10 +648,10 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
         key = cur.fetchone()
         
         if not key:
-            return await callback.answer("⚠️ Ключи для выбранного тарифа временно закончились. Скоро будет пополнение!", show_alert=True)
+            return await callback.answer("Ключи для выбранного тарифа временно закончились. Скоро будет пополнение!", show_alert=True)
             
         if user[0] < tarif["price"]:
-            return await callback.answer("⚠️ Недостаточно средств на балансе. Пожалуйста, пополните счет.", show_alert=True)
+            return await callback.answer("Недостаточно средств на балансе. Пожалуйста, пополните счет.", show_alert=True)
         
         now = datetime.now()
         current_sub_expires = user[3]
@@ -590,12 +675,12 @@ async def buy_confirm_handler(callback: types.CallbackQuery):
             bonus_amount = round(tarif["price"] * REF_PERCENT, 2)
             cur.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bonus_amount, user[1]))
             try: 
-                await bot.send_message(user[1], f"🍀 <b>Реферальный бонус</b>\n\nВаш друг активировал подписку в боте.\nВам зачислено на баланс: <b>{bonus_amount:.2f} ₽</b>.", parse_mode="HTML")
+                await bot.send_message(user[1], f"<b>Реферальный бонус</b>\n\nВаш друг активировал подписку в боте.\nВам зачислено на баланс: <b>{bonus_amount:.2f} ₽</b>.", parse_mode="HTML")
             except: pass
         conn.commit()
     
     text = (
-        f"✅ <b>Оплата прошла успешно!</b>\n\n"
+        f"<b>Оплата прошла успешно!</b>\n\n"
         f"Ваш ключ доступа:\n"
         f"<code>{key[1]}</code>\n\n"
         f"{HAPP_INSTRUCTION}"
@@ -611,9 +696,9 @@ async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext
     ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
     text = (
-        "🍀 <b>Реферальная программа</b>\n\n"
+        "<b>Реферальная программа</b>\n\n"
         "Приглашайте друзей в Горошек VPN и получайте <b>10%</b> от каждой их покупки на свой внутренний баланс.\n\n"
-        f"👥 Приглашено друзей: <b>{ref_count}</b>\n\n"
+        f"Приглашено друзей: <b>{ref_count}</b>\n\n"
         "Ваша персональная ссылка для приглашений:\n"
         f"<code>{ref_link}</code>"
     )
@@ -622,13 +707,13 @@ async def referral_menu_handler(callback: types.CallbackQuery, state: FSMContext
 @dp.callback_query(F.data == "topup_menu")
 async def topup_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    text = "💳 <b>Пополнение баланса</b>\n\nВыберите способ пополнения:"
+    text = "<b>Пополнение баланса</b>\n\nВыберите способ пополнения:"
     await go_to_text_menu(callback, text, topup_menu_kb())
 
 @dp.callback_query(F.data == "topup_platega_menu")
 async def topup_platega_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    text = "💳 <b>Пополнение через Platega (Рубли)</b>\n\nВыберите готовую сумму пополнения или введите свою:"
+    text = "<b>Пополнение через Platega (Рубли)</b>\n\nВыберите готовую сумму пополнения или введите свою:"
     await go_to_text_menu(callback, text, topup_platega_amounts_kb())
 
 @dp.callback_query(F.data.startswith("platega_pay_"))
@@ -638,7 +723,7 @@ async def platega_fixed_pay(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "platega_custom_amount")
 async def platega_custom_amount_start(callback: types.CallbackQuery, state: FSMContext):
-    text = "✍️ <b>Пополнение баланса</b>\n\nВведите сумму для пополнения в рублях (например, <i>150</i> или <i>500</i>):"
+    text = "<b>Пополнение баланса</b>\n\nВведите сумму для пополнения в рублях (например, <i>150</i> или <i>500</i>):"
     await go_to_text_menu(callback, text, cancel_topup_kb())
     await state.set_state(TopUpStates.custom_amount)
 
@@ -649,7 +734,7 @@ async def platega_custom_amount_process(message: types.Message, state: FSMContex
         if amount <= 0:
             raise ValueError
     except ValueError:
-        return await message.answer("❌ Неверный формат суммы. Введите корректное число (например, 200):", reply_markup=cancel_topup_kb())
+        return await message.answer("Неверный формат суммы. Введите корректное число (например, 200):", reply_markup=cancel_topup_kb())
     
     await state.clear()
     
@@ -666,19 +751,19 @@ async def process_platega_generation(callback, amount: float):
     user_id = callback.from_user.id
     username = callback.from_user.username
     
-    wait_msg = await callback.message.answer("⏳ Создаем ссылку на оплату...")
+    wait_msg = await callback.message.answer("Создаем ссылку на оплату...")
     payment_url = await create_platega_payment(amount, user_id, username)
     
     if not payment_url:
-        return await wait_msg.edit_text("❌ Ошибка создания платежа через Platega. Попробуйте позже.", reply_markup=topup_platega_amounts_kb())
+        return await wait_msg.edit_text("Ошибка создания платежа через Platega. Попробуйте позже.", reply_markup=topup_platega_amounts_kb())
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"🔗 Оплатить {amount:.2f} ₽", url=payment_url)],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text=f"Оплатить {amount:.2f} ₽", url=payment_url, style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
     
     await wait_msg.edit_text(
-        f"💳 <b>Счет на оплату создан!</b>\n\n"
+        f"<b>Счет на оплату создан!</b>\n\n"
         f"Сумма: <b>{amount:.2f} ₽</b>\n\n"
         f"Нажмите кнопку ниже для перехода к оплате. После успешного платежа средства зачислятся автоматически.",
         reply_markup=kb,
@@ -688,7 +773,7 @@ async def process_platega_generation(callback, amount: float):
 @dp.callback_query(F.data == "topup_stars_menu")
 async def topup_stars_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    text = "⭐️ <b>Пополнение через Telegram Stars</b>\n\nВыберите удобную сумму (1 звезда = 1 рубль):"
+    text = "<b>Пополнение через Telegram Stars</b>\n\nВыберите удобную сумму (1 звезда = 1 рубль):"
     await go_to_text_menu(callback, text, topup_stars_amounts_kb())
 
 @dp.callback_query(F.data.startswith("paystars_"))
@@ -716,17 +801,17 @@ async def process_successful_payment(message: types.Message):
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, message.from_user.id))
         conn.commit()
-    await message.answer(f"✅ <b>Баланс успешно пополнен на {amount:.2f} ₽!</b>", reply_markup=main_menu_kb(), parse_mode="HTML")
+    await message.answer(f"<b>Баланс успешно пополнен на {amount:.2f} ₽!</b>", reply_markup=main_menu_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "show_my_key")
 async def show_my_key_handler(callback: types.CallbackQuery):
     user = get_user(callback.from_user.id)
     key_data = user[4]
     if not key_data:
-        return await callback.answer("⚠️ У вас нет активного ключа.", show_alert=True)
+        return await callback.answer("У вас нет активного ключа.", show_alert=True)
     
     text = (
-        f"🔑 <b>Ваш ключ доступа:</b>\n"
+        f"<b>Ваш ключ доступа:</b>\n"
         f"<code>{key_data}</code>\n\n"
         f"{HAPP_INSTRUCTION}"
     )
@@ -743,7 +828,7 @@ async def profile_handler(event: types.Message | types.CallbackQuery, state: FSM
     sub_expires_str = user[3]
     key_data = user[4]
     
-    sub_status = "❌ Не активна"
+    sub_status = "Не активна"
     days_left = 0
     has_sub = False
     
@@ -754,17 +839,17 @@ async def profile_handler(event: types.Message | types.CallbackQuery, state: FSM
             if exp_date > now:
                 delta = exp_date - now
                 days_left = delta.days + (1 if delta.seconds > 0 else 0)
-                sub_status = f"🟢 Активна"
+                sub_status = f"Активна"
                 has_sub = True
         except:
             pass
 
     text = (
-        f"👤 <b>Личный кабинет</b>\n\n"
-        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-        f"💳 <b>Баланс:</b> <b>{balance:.2f} ₽</b>\n\n"
-        f"🛡 <b>Статус подписки:</b> {sub_status}\n"
-        f"⏳ <b>Осталось дней:</b> <b>{days_left}</b>\n"
+        f"<b>Личный кабинет</b>\n\n"
+        f"<b>ID:</b> <code>{user_id}</code>\n"
+        f"<b>Баланс:</b> <b>{balance:.2f} ₽</b>\n\n"
+        f"<b>Статус подписки:</b> {sub_status}\n"
+        f"<b>Осталось дней:</b> <b>{days_left}</b>\n"
     )
     
     kb = profile_kb(has_sub)
@@ -778,7 +863,7 @@ async def rules_handler(callback: types.CallbackQuery, state: FSMContext = None)
     if state:
         await state.clear()
     text = (
-        "📜 <b>Правила и юридическая информация</b>\n\n"
+        "<b>Правила и юридическая информация</b>\n\n"
         "Выберите интересующий документ:"
     )
     await go_to_text_menu(callback, text, rules_kb())
@@ -797,7 +882,7 @@ async def help_handler(event: types.Message | types.CallbackQuery, state: FSMCon
 async def back_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = (
-        "🌱 <b>Добро пожаловать в Горошек VPN</b>\n\n"
+        "<b>Добро пожаловать в Горошек VPN</b>\n\n"
         "Ваш надежный проводник в мир быстрого, безопасного и свободного интернета без границ.\n\n"
         "Выберите нужный раздел в меню ниже:"
     )
@@ -828,7 +913,7 @@ async def handle_platega_webhook(request):
             try:
                 await bot.send_message(
                     int(telegram_id),
-                    f"✅ <b>Оплата прошла успешно!</b>\n\nВаш баланс пополнен на <b>{float(amount):.2f} ₽</b>.",
+                    f"<b>Оплата прошла успешно!</b>\n\nВаш баланс пополнен на <b>{float(amount):.2f} ₽</b>.",
                     parse_mode="HTML"
                 )
             except Exception as e:
@@ -842,7 +927,7 @@ async def handle_platega_webhook(request):
 async def self_ping():
     await asyncio.sleep(10)
     port = os.getenv("PORT", "8080")
-    render_url = os.getenv("RENDER_EXTERNAL_URL", f"http://127.1:{port}")
+    render_url = os.getenv("RENDER_EXTERNAL_URL", f"http://127.0.0.1:{port}")
     async with ClientSession() as session:
         while True:
             try:
