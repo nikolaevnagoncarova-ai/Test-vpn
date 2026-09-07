@@ -136,7 +136,7 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- КЛАВИАТУРЫ ---
+# --- КЛАВИАТУРЫ (С эмодзи в тексте) ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="catalog")],
@@ -248,6 +248,7 @@ async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup
     else:
         await callback.message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
+# --- ИСПРАВЛЕННОЕ СОЗДАНИЕ ПЛАТЕЖА PLATEGA ---
 async def create_platega_payment(amount: float, user_id: int, username: str):
     order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
     headers = {
@@ -257,7 +258,7 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
     }
     
     payload = {
-        "paymentMethod": 1,
+        "paymentMethod": "SBP",
         "paymentDetails": {
             "amount": amount,
             "currency": "RUB"
@@ -286,12 +287,10 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
                         redirect_url = data.get("redirect") or data.get("paymentUrl") or data.get("url") or data.get("payUrl")
                         if redirect_url:
                             return redirect_url
-                    elif response.status != 405:
+                    else:
                         logging.error(f"❌ [PLATEGA ERROR] Endpoint: {ep} | Status: {response.status} | Response: {response_text}")
-                        break
             except Exception as e:
                 logging.error(f"❌ [PLATEGA EXCEPTION] Endpoint {ep} Connection Error: {e}")
-                break
     return None
 
 @dp.message(Command("claimadmin"))
