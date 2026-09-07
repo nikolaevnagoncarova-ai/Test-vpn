@@ -296,6 +296,7 @@ async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup
     else:
         await callback.message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
+# ОБНОВЛЕННАЯ ФУНКЦИЯ С ДЕТАЛЬНЫМ ЛОГИРОВАНИЕМ В ОШИБКАХ
 async def create_platega_payment(amount: float, user_id: int, username: str):
     order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
     headers = {
@@ -322,14 +323,16 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
     async with ClientSession() as session:
         try:
             async with session.post(f"{PLATEGA_API_URL}/transaction/create", json=payload, headers=headers, timeout=10) as response:
-                if response.status == 200:
+                response_text = await response.text()
+                
+                if response.status in [200, 201]:
                     data = await response.json()
-                    return data.get("paymentUrl") or data.get("url")
+                    return data.get("paymentUrl") or data.get("url") or data.get("payUrl")
                 else:
-                    logging.error(f"Platega error: {await response.text()}")
+                    logging.error(f"❌ [PLATEGA ERROR] Status Code: {response.status} | Response: {response_text}")
                     return None
         except Exception as e:
-            logging.error(f"Platega connection error: {e}")
+            logging.error(f"❌ [PLATEGA EXCEPTION] Connection Error: {e}", exc_info=True)
             return None
 
 @dp.message(Command("claimadmin"))
