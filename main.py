@@ -306,6 +306,7 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
     }
     
     payload = {
+        "paymentMethod": 1,
         "paymentDetails": {
             "amount": amount,
             "currency": "RUB"
