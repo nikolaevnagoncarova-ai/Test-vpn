@@ -1,3 +1,4 @@
+Вот наш код, просто добавь туда это изменение с платегой, больше ничего не трогай, перепроверь.
 import os
 import asyncio
 import logging
@@ -18,7 +19,7 @@ MENU_PHOTO = "https://ibb.co/hRyLQ5Zh"
 
 PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
 PLATEGA_SECRET_KEY = os.getenv("PLATEGA_SECRET_KEY", "YOUR_SECRET_KEY")
-PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io").rstrip('/')
+PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io")
 
 DB_FILE = "goroshek_vpn.db"
 
@@ -136,100 +137,148 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- КЛАВИАТУРЫ (С эмодзи в тексте) ---
+# --- КЛАВИАТУРЫ С ЗЕЛЕНЫМИ КНОПКАМИ И ПРЕМИУМ ЭМОДЗИ ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="catalog")],
-        [InlineKeyboardButton(text="🎁 Пробный период (3 дня)", callback_data="free_trial")],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup_menu")],
         [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
-            InlineKeyboardButton(text="👥 Рефералы", callback_data="referral_menu")
+            InlineKeyboardButton(
+                text="Купить подписку", 
+                callback_data="catalog", 
+                icon_custom_emoji_id="5235685594771790154",
+                style="success"
+            )
         ],
         [
-            InlineKeyboardButton(text="📖 Инструкция", callback_data="help"),
-            InlineKeyboardButton(text="📜 Правила", callback_data="rules")
+            InlineKeyboardButton(
+                text="Пробный период (3 дня)", 
+                callback_data="free_trial", 
+                icon_custom_emoji_id="5235526088276353071",
+                style="success"
+            )
         ],
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/IRFIX_Factor")]
+        [
+            InlineKeyboardButton(
+                text="Пополнить баланс", 
+                callback_data="topup_menu",
+                icon_custom_emoji_id="5235685594771790154",
+                style="success"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Профиль", 
+                callback_data="profile",
+                icon_custom_emoji_id="5235526088276353071",
+                style="success"
+            ),
+            InlineKeyboardButton(
+                text="Рефералы", 
+                callback_data="referral_menu",
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Инструкция", 
+                callback_data="help",
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
+            ),
+            InlineKeyboardButton(
+                text="Правила", 
+                callback_data="rules", 
+                icon_custom_emoji_id="5235562737232291360",
+                style="success"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Поддержка", 
+                url="https://t.me/IRFIX_Factor",
+                icon_custom_emoji_id="5238192193520314051",
+                style="success"
+            )
+        ]
     ])
 
 def catalog_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 месяц — 119 ₽", callback_data="select_tarif_1")],
-        [InlineKeyboardButton(text="3 месяца — 309 ₽", callback_data="select_tarif_3")],
-        [InlineKeyboardButton(text="6 месяцев — 589 ₽", callback_data="select_tarif_6")],
-        [InlineKeyboardButton(text="12 месяцев — 979 ₽", callback_data="select_tarif_12")],
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="1 месяц — 119 ₽", callback_data="select_tarif_1", style="success")],
+        [InlineKeyboardButton(text="3 месяца — 309 ₽", callback_data="select_tarif_3", style="success")],
+        [InlineKeyboardButton(text="6 месяцев — 589 ₽", callback_data="select_tarif_6", style="success")],
+        [InlineKeyboardButton(text="12 месяцев — 979 ₽", callback_data="select_tarif_12", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def confirm_kb(tarif_id: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить покупку", callback_data=f"buy_confirm_{tarif_id}")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="catalog")]
+        [InlineKeyboardButton(text="Подтвердить покупку", callback_data=f"buy_confirm_{tarif_id}", style="success")],
+        [InlineKeyboardButton(text="Отмена", callback_data="catalog", style="success")]
     ])
 
 def profile_kb(has_sub: bool):
     kb = []
     if has_sub:
-        kb.append([InlineKeyboardButton(text="🔑 Мой ключ доступа", callback_data="show_my_key")])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")])
+        kb.append([InlineKeyboardButton(text="Мой ключ доступа", callback_data="show_my_key", style="success")])
+    kb.append([InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def rules_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")],
-        [InlineKeyboardButton(text="Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")],
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39", style="success")],
+        [InlineKeyboardButton(text="Политика Конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def referral_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def topup_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Пополнить через Platega (Рубли)", callback_data="topup_platega_menu")],
-        [InlineKeyboardButton(text="⭐ Пополнить через Telegram Stars", callback_data="topup_stars_menu")],
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Пополнить через Platega (Рубли)", callback_data="topup_platega_menu", style="success")],
+        [InlineKeyboardButton(text="Пополнить через Telegram Stars", callback_data="topup_stars_menu", style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def topup_platega_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="119 ₽", callback_data="platega_pay_119"), InlineKeyboardButton(text="309 ₽", callback_data="platega_pay_309")],
-        [InlineKeyboardButton(text="589 ₽", callback_data="platega_pay_589"), InlineKeyboardButton(text="979 ₽", callback_data="platega_pay_979")],
-        [InlineKeyboardButton(text="✏️ Ввести свою сумму", callback_data="platega_custom_amount")],
-        [InlineKeyboardButton(text="⬅️ Назад к выбору метода", callback_data="topup_menu")]
+        [InlineKeyboardButton(text="119 ₽", callback_data="platega_pay_119", style="success"), InlineKeyboardButton(text="309 ₽", callback_data="platega_pay_309", style="success")],
+        [InlineKeyboardButton(text="589 ₽", callback_data="platega_pay_589", style="success"), InlineKeyboardButton(text="979 ₽", callback_data="platega_pay_979", style="success")],
+        [InlineKeyboardButton(text="Ввести свою сумму", callback_data="platega_custom_amount", style="success")],
+        [InlineKeyboardButton(text="Назад к выбору метода", callback_data="topup_menu", style="success")]
     ])
 
 def topup_stars_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="119 Stars", callback_data="paystars_119"), InlineKeyboardButton(text="309 Stars", callback_data="paystars_309")],
-        [InlineKeyboardButton(text="589 Stars", callback_data="paystars_589"), InlineKeyboardButton(text="979 Stars", callback_data="paystars_979")],
-        [InlineKeyboardButton(text="⬅️ Назад к выбору метода", callback_data="topup_menu")]
+        [InlineKeyboardButton(text="119 Stars", callback_data="paystars_119", style="success"), InlineKeyboardButton(text="309 Stars", callback_data="paystars_309", style="success")],
+        [InlineKeyboardButton(text="589 Stars", callback_data="paystars_589", style="success"), InlineKeyboardButton(text="979 Stars", callback_data="paystars_979", style="success")],
+        [InlineKeyboardButton(text="Назад к выбору метода", callback_data="topup_menu", style="success")]
     ])
 
 def back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
 
 def cancel_topup_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="topup_platega_menu")]
+        [InlineKeyboardButton(text="Отмена", callback_data="topup_platega_menu", style="success")]
     ])
 
 def admin_panel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast"), InlineKeyboardButton(text="➕ Добавить ключ", callback_data="adm_addkey")],
-        [InlineKeyboardButton(text="💵 Выдать баланс", callback_data="adm_givemoney"), InlineKeyboardButton(text="💸 Забрать баланс", callback_data="adm_takemoney")],
-        [InlineKeyboardButton(text="👑 Дать админа", callback_data="adm_giveadmin")],
-        [InlineKeyboardButton(text="❌ Закрыть", callback_data="back_main")]
+        [InlineKeyboardButton(text="Рассылка", callback_data="adm_broadcast", style="success"), InlineKeyboardButton(text="Добавить ключ", callback_data="adm_addkey", style="success")],
+        [InlineKeyboardButton(text="Выдать баланс", callback_data="adm_givemoney", style="success"), InlineKeyboardButton(text="Забрать баланс", callback_data="adm_takemoney", style="success")],
+        [InlineKeyboardButton(text="Дать админа", callback_data="adm_giveadmin", style="success")],
+        [InlineKeyboardButton(text="Закрыть", callback_data="back_main", style="success")]
     ])
 
 def admin_cancel_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_cancel")]
+        [InlineKeyboardButton(text="Отмена", callback_data="adm_cancel", style="success")]
     ])
 
 HAPP_INSTRUCTION = (
@@ -248,7 +297,6 @@ async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup
     else:
         await callback.message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
-# --- ИСПРАВЛЕННОЕ СОЗДАНИЕ ПЛАТЕЖА PLATEGA ---
 async def create_platega_payment(amount: float, user_id: int, username: str):
     order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
     headers = {
@@ -258,40 +306,32 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
     }
     
     payload = {
-        "paymentMethod": "SBP",
         "paymentDetails": {
             "amount": amount,
             "currency": "RUB"
         },
+        "orderId": order_id,
         "description": f"Пополнение баланса Горошек VPN на {amount} ₽",
-        "return": f"https://t.me/{username}" if username else "https://t.me",
-        "failedUrl": f"https://t.me/{username}" if username else "https://t.me",
+        "returnUrl": "https://t.me/" + (username if username else "bot"),
+        "failUrl": "https://t.me/" + (username if username else "bot"),
         "metadata": {
-            "telegram_id": str(user_id),
-            "amount": str(amount),
-            "order_id": order_id
+            "telegram_id": user_id,
+            "amount": amount
         }
     }
 
-    base_url = PLATEGA_API_URL.rstrip('/')
-    endpoints = ["/transaction/process", "/transaction/create", "/payment/create"]
-
     async with ClientSession() as session:
-        for ep in endpoints:
-            try:
-                url = f"{base_url}{ep}"
-                async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                    response_text = await response.text()
-                    if response.status in [200, 201]:
-                        data = await response.json()
-                        redirect_url = data.get("redirect") or data.get("paymentUrl") or data.get("url") or data.get("payUrl")
-                        if redirect_url:
-                            return redirect_url
-                    else:
-                        logging.error(f"❌ [PLATEGA ERROR] Endpoint: {ep} | Status: {response.status} | Response: {response_text}")
-            except Exception as e:
-                logging.error(f"❌ [PLATEGA EXCEPTION] Endpoint {ep} Connection Error: {e}")
-    return None
+        try:
+            async with session.post(f"{PLATEGA_API_URL}/transaction/create", json=payload, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("paymentUrl") or data.get("url")
+                else:
+                    logging.error(f"Platega error: {await response.text()}")
+                    return None
+        except Exception as e:
+            logging.error(f"Platega connection error: {e}")
+            return None
 
 @dp.message(Command("claimadmin"))
 async def claim_admin_handler(message: types.Message, command: CommandObject):
@@ -719,8 +759,8 @@ async def process_platega_generation(callback, amount: float):
         return await wait_msg.edit_text("Ошибка создания платежа через Platega. Попробуйте позже.", reply_markup=topup_platega_amounts_kb())
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Оплатить {amount:.2f} ₽", url=payment_url)],
-        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_main")]
+        [InlineKeyboardButton(text=f"Оплатить {amount:.2f} ₽", url=payment_url, style="success")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_main", icon_custom_emoji_id="5238192193520314051", style="success")]
     ])
     
     await wait_msg.edit_text(
@@ -896,15 +936,7 @@ async def self_ping():
             except: pass
             await asyncio.sleep(600)
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    init_db()
-    
-    await bot.delete_webhook(drop_pending_updates=True)
-    await set_bot_commands(bot)
-    
-    asyncio.create_task(self_ping())
-    
+async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_ping)
     app.router.add_post("/platega/webhook", handle_platega_webhook)
@@ -917,7 +949,22 @@ async def main():
     await site.start()
     logging.info(f"Web server started on port {port}")
     
-    await dp.start_polling(bot, handle_as_tasks=True)
+    while True:
+        await asyncio.sleep(3600)
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    init_db()
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    await set_bot_commands(bot)
+    
+    asyncio.create_task(self_ping())
+    
+    await asyncio.gather(
+        start_web_server(),
+        dp.start_polling(bot, handle_as_tasks=True)
+    )
 
 if __name__ == "__main__":
     try:
