@@ -18,7 +18,7 @@ MENU_PHOTO = "https://ibb.co/hRyLQ5Zh"
 
 PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID", "YOUR_MERCHANT_ID")
 PLATEGA_SECRET_KEY = os.getenv("PLATEGA_SECRET_KEY", "YOUR_SECRET_KEY")
-PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io")
+PLATEGA_API_URL = os.getenv("PLATEGA_API_URL", "https://app.platega.io").rstrip('/')
 
 DB_FILE = "goroshek_vpn.db"
 
@@ -136,7 +136,7 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- КЛАВИАТУРЫ С ЗЕЛЕНЫМИ КНОПКАМИ И ПРЕМИУМ ЭМОДЗИ ---
+# --- КЛАВИАТУРЫ ---
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -252,7 +252,7 @@ def topup_platega_amounts_kb():
 
 def topup_stars_amounts_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="119 Stars", callback_data="paystars_119", style="success"), InlineKeyboardButton(text="309 Stars", callback_data="paystars_309", style="success")],
+        [InlineKeyboardButton(text="119 Stars", callback_data="paystars_119", style="success"), InlineKeyboardButton(text="309 Stars", callback_data="paystars_589", style="success")],
         [InlineKeyboardButton(text="589 Stars", callback_data="paystars_589", style="success"), InlineKeyboardButton(text="979 Stars", callback_data="paystars_979", style="success")],
         [InlineKeyboardButton(text="Назад к выбору метода", callback_data="topup_menu", style="success")]
     ])
@@ -296,7 +296,7 @@ async def go_to_text_menu(callback: types.CallbackQuery, text: str, reply_markup
     else:
         await callback.message.edit_text(text=text, reply_markup=reply_markup, parse_mode="HTML")
 
-# ОБНОВЛЕННАЯ ФУНКЦИЯ С ДЕТАЛЬНЫМ ЛОГИРОВАНИЕМ В ОШИБКАХ
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ СОЗДАНИЯ ПЛАТЕЖА PLATEGA
 async def create_platega_payment(amount: float, user_id: int, username: str):
     order_id = f"topup_{user_id}_{int(datetime.now().timestamp())}"
     headers = {
@@ -310,30 +310,37 @@ async def create_platega_payment(amount: float, user_id: int, username: str):
             "amount": amount,
             "currency": "RUB"
         },
-        "orderId": order_id,
         "description": f"Пополнение баланса Горошек VPN на {amount} ₽",
-        "returnUrl": "https://t.me/" + (username if username else "bot"),
-        "failUrl": "https://t.me/" + (username if username else "bot"),
+        "return": f"https://t.me/{username}" if username else "https://t.me",
+        "failedUrl": f"https://t.me/{username}" if username else "https://t.me",
         "metadata": {
-            "telegram_id": user_id,
-            "amount": amount
+            "telegram_id": str(user_id),
+            "amount": str(amount),
+            "order_id": order_id
         }
     }
 
+    base_url = PLATEGA_API_URL.rstrip('/')
+    endpoints = ["/transaction/process", "/transaction/create", "/payment/create"]
+
     async with ClientSession() as session:
-        try:
-            async with session.post(f"{PLATEGA_API_URL}/transaction/create", json=payload, headers=headers, timeout=10) as response:
-                response_text = await response.text()
-                
-                if response.status in [200, 201]:
-                    data = await response.json()
-                    return data.get("paymentUrl") or data.get("url") or data.get("payUrl")
-                else:
-                    logging.error(f"❌ [PLATEGA ERROR] Status Code: {response.status} | Response: {response_text}")
-                    return None
-        except Exception as e:
-            logging.error(f"❌ [PLATEGA EXCEPTION] Connection Error: {e}", exc_info=True)
-            return None
+        for ep in endpoints:
+            try:
+                url = f"{base_url}{ep}"
+                async with session.post(url, json=payload, headers=headers, timeout=10) as response:
+                    response_text = await response.text()
+                    if response.status in [200, 201]:
+                        data = await response.json()
+                        redirect_url = data.get("redirect") or data.get("paymentUrl") or data.get("url") or data.get("payUrl")
+                        if redirect_url:
+                            return redirect_url
+                    elif response.status != 405:
+                        logging.error(f"❌ [PLATEGA ERROR] Endpoint: {ep} | Status: {response.status} | Response: {response_text}")
+                        break
+            except Exception as e:
+                logging.error(f"❌ [PLATEGA EXCEPTION] Endpoint {ep} Connection Error: {e}")
+                break
+    return None
 
 @dp.message(Command("claimadmin"))
 async def claim_admin_handler(message: types.Message, command: CommandObject):
